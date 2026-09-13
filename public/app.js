@@ -64,7 +64,7 @@ function priceBlock(p) {
 
 function renderPanel() {
   const p = state.price, s = p.stats;
-  $("chartTitle").textContent = `${p.ticker} · cierre diario (${p.candles.length} ruedas)`;
+  $("chartTitle").textContent = `${p.ticker} · cierre diario (${p.candles.length} ruedas) · fuente: ${p.source || "—"}`;
   const cells = [
     ["Último", n2(s.last), s.date, ""],
     ["1 día", sign(s.ret1), "", cls(s.ret1)],
@@ -396,7 +396,7 @@ async function load() {
   try {
     state.price = await api(`/api/price?t=${encodeURIComponent(t)}`);
     renderPanel();
-    status(`${state.price.ticker} · ${state.price.stats.date}`);
+    status(`${state.price.ticker} · ${state.price.stats.date} · ${state.price.source || ""}`);
     if (r) {
       try { state.rival = await api(`/api/price?t=${encodeURIComponent(r)}`); }
       catch { state.rival = null; }

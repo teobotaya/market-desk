@@ -20,8 +20,14 @@ async function cached(key, ttlMs, fn) {
   return v;
 }
 
+/* Node no descomprime si uno fija Accept-Encoding a mano: no lo fijamos.
+   La SEC exige un User-Agent con contacto; el resto de las fuentes rechazan
+   agentes que no parezcan un navegador. */
+const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
+
 async function get(url, { text = true, limit = 12_000_000 } = {}) {
-  const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Encoding": "gzip, deflate" } });
+  const agent = /\.sec\.gov/.test(url) ? UA : BROWSER_UA;
+  const res = await fetch(url, { headers: { "User-Agent": agent, "Accept": "*/*" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} al pedir ${url}`);
   if (!text) return res;
   const body = await res.text();
@@ -32,7 +38,9 @@ async function get(url, { text = true, limit = 12_000_000 } = {}) {
 
 function parseStooq(csv) {
   const lines = csv.trim().split("\n");
-  if (lines.length < 3 || !/^Date,/i.test(lines[0])) throw new Error("Stooq no devolvió datos para ese símbolo");
+  if (lines.length < 3 || !/^Date,/i.test(lines[0])) {
+    throw new Error(`Stooq no devolvió una serie válida. Respondió: ${csv.slice(0, 160).replace(/\s+/g, " ")}`);
+  }
   return lines.slice(1).map((l) => {
     const [d, o, h, lo, c, v] = l.split(",");
     return { d, o: +o, h: +h, l: +lo, c: +c, v: +v };
@@ -89,11 +97,94 @@ function stats(rows) {
   };
 }
 
+/* Las fuentes gratuitas de precios bloquean peticiones sin cookies: Yahoo
+   responde 429 y Stooq devuelve un desafío de JavaScript. Por eso hay tres
+   fuentes en cadena y Yahoo arranca pidiendo cookies como haría un navegador. */
+
+let yahooCookie = null;
+
+async function yahooCookies() {
+  if (yahooCookie) return yahooCookie;
+  try {
+    const r = await fetch("https://finance.yahoo.com/", {
+      headers: { "User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" }
+    });
+    const raw = r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get("set-cookie")].filter(Boolean);
+    yahooCookie = raw.map((c) => String(c).split(";")[0]).join("; ");
+  } catch { yahooCookie = ""; }
+  return yahooCookie;
+}
+
+async function fromYahoo(sym) {
+  const cookie = await yahooCookies();
+  const headers = {
+    "User-Agent": BROWSER_UA,
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": `https://finance.yahoo.com/quote/${sym}`,
+    ...(cookie ? { Cookie: cookie } : {})
+  };
+  let last = "";
+  for (const host of ["query2", "query1"]) {
+    const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=2y&interval=1d`;
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) { last = `${host}: ${res.status}`; continue; }
+      const j = await res.json();
+      const r = j?.chart?.result?.[0];
+      if (!r?.timestamp?.length) { last = `${host}: ${j?.chart?.error?.description || "sin serie"}`; continue; }
+      const q = r.indicators.quote[0];
+      const rows = r.timestamp.map((t, i) => ({
+        d: new Date(t * 1000).toISOString().slice(0, 10),
+        o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume[i]
+      })).filter((x) => Number.isFinite(x.c) && Number.isFinite(x.h) && Number.isFinite(x.l));
+      if (rows.length >= 30) return rows;
+      last = `${host}: serie de ${rows.length} ruedas`;
+    } catch (e) { last = `${host}: ${e.message}`; }
+  }
+  yahooCookie = null;
+  throw new Error(last || "sin respuesta");
+}
+
+const money = (v) => Number(String(v).replace(/[$,]/g, ""));
+
+async function fromNasdaq(sym) {
+  const to = new Date(), from = new Date(Date.now() - 730 * 864e5);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(sym)}/historical?assetclass=stocks&fromdate=${iso(from)}&todate=${iso(to)}&limit=9999`;
+  const res = await fetch(url, { headers: { "User-Agent": BROWSER_UA, "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9" } });
+  if (!res.ok) throw new Error(String(res.status));
+  const j = await res.json();
+  const rows = (j?.data?.tradesTable?.rows || []).map((r) => {
+    const [m, d, y] = r.date.split("/");
+    return { d: `${y}-${m}-${d}`, o: money(r.open), h: money(r.high), l: money(r.low), c: money(r.close), v: money(r.volume) };
+  }).filter((x) => Number.isFinite(x.c) && Number.isFinite(x.h)).reverse();
+  if (rows.length < 30) throw new Error(`serie de ${rows.length} ruedas`);
+  return rows;
+}
+
+async function fromStooq(sym) {
+  let last = "";
+  for (const host of ["stooq.com", "stooq.pl"]) {
+    try { return parseStooq(await get(`https://${host}/q/d/l/?s=${encodeURIComponent(sym)}.us&i=d`)); }
+    catch (e) { last = e.message; }
+  }
+  throw new Error(last);
+}
+
 async function price(ticker) {
-  const sym = ticker.trim().toLowerCase();
-  const csv = await get(`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}.us&i=d`);
-  const rows = parseStooq(csv).slice(-500);
-  return { ticker: ticker.toUpperCase(), candles: rows, stats: stats(rows) };
+  const sym = ticker.trim().toUpperCase();
+  const chain = [["Yahoo Finance", () => fromYahoo(sym)], ["Nasdaq", () => fromNasdaq(sym)], ["Stooq", () => fromStooq(sym.toLowerCase())]];
+  const fails = [];
+  for (const [source, fn] of chain) {
+    try {
+      const rows = (await fn()).slice(-500);
+      return { ticker: sym, source, candles: rows, stats: stats(rows) };
+    } catch (e) {
+      fails.push(`${source}: ${String(e.message).slice(0, 90)}`);
+    }
+  }
+  throw new Error(`Ninguna fuente devolvió la serie de ${sym}. ${fails.join(" · ")}`);
 }
 
 /* ------------------------------------------------------------------- SEC */
@@ -113,6 +204,8 @@ async function tickerMap() {
 const strip = (html) => html
   .replace(/<script[\s\S]*?<\/script>/gi, " ")
   .replace(/<style[\s\S]*?<\/style>/gi, " ")
+  .replace(/<br[^>]*>/gi, "\n")
+  .replace(/<\/(p|div|tr|li|h[1-6]|table|section)>/gi, "\n\n")
   .replace(/<[^>]+>/g, " ")
   .replace(/&nbsp;|&#160;/gi, " ")
   .replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
@@ -143,7 +236,7 @@ const SPECIFIC = [
 function classifyRisks(text) {
   const paras = text.split(/\n{2,}|(?<=\.)\s{2,}/)
     .map((p) => p.replace(/\s+/g, " ").trim())
-    .filter((p) => p.length > 220 && p.length < 4000);
+    .filter((p) => p.length > 200 && p.length < 6000);
   return paras.slice(0, 120).map((p) => {
     const low = p.toLowerCase();
     const generic = GENERIC.filter((g) => low.includes(g));
@@ -177,13 +270,21 @@ async function riskFactors(ticker) {
   const url = `https://www.sec.gov/Archives/edgar/data/${Number(co.cik)}/${accn}/${doc}`;
   const text = strip(await get(url));
 
-  const m = text.match(/item\s*1A[.\s—-]*risk\s*factors([\s\S]*?)item\s*1B[.\s—-]/i)
-    || text.match(/item\s*1A[.\s—-]*risk\s*factors([\s\S]*?)item\s*2[.\s—-]*propert/i)
-    || text.match(/risk\s*factors([\s\S]{2000,200000})/i);
-
-  if (!m) throw new Error("Encontré el 10-K pero no pude aislar la sección Item 1A. Abrí el documento a mano.");
-
-  const section = m[1];
+  /* El índice del 10-K también dice "Item 1A ... Item 1B", así que el primer
+     match casi siempre es esa línea. Nos quedamos con el fragmento más largo. */
+  const patrones = [
+    /item\s*1A[.\s—–-]*risk\s*factors([\s\S]*?)item\s*1B[.\s—–-]*unresolved/gi,
+    /item\s*1A[.\s—–-]*risk\s*factors([\s\S]*?)item\s*1B[.\s—–-]/gi,
+    /item\s*1A[.\s—–-]*risk\s*factors([\s\S]*?)item\s*2[.\s—–-]*propert/gi,
+    /risk\s*factors([\s\S]*?)unresolved\s*staff\s*comments/gi
+  ];
+  let section = "";
+  for (const re of patrones) {
+    for (const m of text.matchAll(re)) if (m[1].length > section.length) section = m[1];
+  }
+  if (section.length < 3000) {
+    throw new Error(`Encontré el 10-K pero la sección Item 1A quedó en ${section.length} caracteres. Abrilo a mano: ${url}`);
+  }
   return {
     company: co.name,
     cik: co.cik,
@@ -282,5 +383,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Market Desk en http://localhost:${PORT}`);
-  console.log("Fuentes sin clave: Stooq (precios) · SEC EDGAR (10-K) · Google News RSS (noticias)");
+  console.log("Fuentes sin clave: Yahoo Finance y Stooq (precios) · SEC EDGAR (10-K) · Google News RSS (noticias)");
 });
