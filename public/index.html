@@ -34,6 +34,7 @@ h2{font-size:19px;margin:0 0 4px}
 .cell{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
 .cell .k{font:10.5px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
 .cell .v{font-family:var(--mono);font-size:19px;font-variant-numeric:tabular-nums;margin-top:2px}
+.cell input,.cell select{width:100%;margin-top:3px;font-family:var(--mono);font-size:15px;padding:4px 7px}
 .cell .x{font:11.5px/1.4 var(--mono);color:var(--faint)}
 .up{color:var(--up)}.down{color:var(--down)}.warn{color:var(--warn)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:14px;margin-bottom:16px}
@@ -47,12 +48,19 @@ textarea{width:100%;min-height:180px;font-family:var(--mono);font-size:12.5px;re
 .dossier{border:1px solid var(--line2);border-radius:9px;overflow:hidden;margin-top:18px}
 .dossier header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px 8px 13px;background:var(--panel2);border-bottom:1px solid var(--line)}
 .dossier header span{font:10.5px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.ia{border-top:1px solid var(--line);padding:13px;background:var(--panel);white-space:pre-wrap;font-size:14px;line-height:1.6}
+.ia .head{font:10.5px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
 .dossier pre{margin:0;padding:13px;background:#0b0e14;font-family:var(--mono);font-size:12px;line-height:1.58;white-space:pre-wrap;max-height:420px;overflow:auto}
 .pill{display:inline-block;font:11px/1.5 var(--mono);padding:1px 7px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
 .pill.esp{color:var(--warn);border-color:var(--warn)}
 .pill.gen{color:var(--faint)}
 .pill.mix{color:var(--accent);border-color:var(--accent)}
 .msg{padding:11px 13px;border-radius:8px;border:1px solid var(--line2);color:var(--muted);font-size:14px;background:var(--panel)}
+.crit{display:flex;align-items:flex-start;gap:9px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.crit b{font-size:16px;line-height:1.2}
+.crit .ok{color:var(--up)}
+.crit .no{color:var(--down)}
+.veredicto{font-family:var(--mono);font-size:22px;margin:4px 0 2px}
 .msg.err{border-color:var(--down);color:var(--down)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .quote{border-left:3px solid var(--down);padding:6px 0 6px 12px;margin:0 0 10px;color:var(--ink);font-size:14px}
@@ -66,9 +74,10 @@ textarea{width:100%;min-height:180px;font-family:var(--mono);font-size:12.5px;re
 <div class="top">
   <div class="brand">Market Desk<small>análisis · sin claves</small></div>
   <input id="ticker" type="text" value="NVDA" aria-label="Ticker principal">
-  <input id="rival" type="text" value="AMD" aria-label="Ticker competidor">
+  <input id="rival" type="text" value="AMD" aria-label="Ticker competidor" title="Competidor o índice. Para índices usá su ETF: SPY, QQQ, SOXX, DIA, IWM">
   <button class="go" id="load">Cargar</button>
   <span id="status" class="pill">listo</span>
+  <span id="iaEstado" class="pill">IA: —</span>
 </div>
 
 <div class="tabs" role="tablist">
@@ -77,6 +86,9 @@ textarea{width:100%;min-height:180px;font-family:var(--mono);font-size:12.5px;re
   <button class="tab" role="tab" data-v="call" aria-selected="false">Earnings call</button>
   <button class="tab" role="tab" data-v="foso" aria-selected="false">Foso competitivo</button>
   <button class="tab" role="tab" data-v="sent" aria-selected="false">Sentimiento</button>
+  <button class="tab" role="tab" data-v="fund" aria-selected="false">Fundamentales</button>
+  <button class="tab" role="tab" data-v="perfil" aria-selected="false">Perfil de riesgo</button>
+  <button class="tab" role="tab" data-v="criterios" aria-selected="false">Mis criterios</button>
   <button class="tab" role="tab" data-v="riesgo" aria-selected="false">Riesgos 10-K</button>
 </div>
 
@@ -84,6 +96,7 @@ textarea{width:100%;min-height:180px;font-family:var(--mono);font-size:12.5px;re
   <section class="view on" id="v-panel">
     <h2>Panel</h2>
     <p class="sub">Precio diario de Stooq y las métricas que mira una operativa de corto plazo: momento, volatilidad, ATR para dimensionar el stop, posición frente a las medias y volumen relativo.</p>
+    <div class="msg" id="aviso" style="display:none;margin-bottom:14px"></div>
     <div class="grid" id="stats"></div>
     <div class="card"><h3 id="chartTitle">Precio</h3><svg class="chart" id="chart" viewBox="0 0 900 260" preserveAspectRatio="none"></svg></div>
   </section>
@@ -119,6 +132,44 @@ textarea{width:100%;min-height:180px;font-family:var(--mono);font-size:12.5px;re
       <button id="goNews">Buscar</button>
     </div>
     <div id="outSent"></div>
+  </section>
+
+  <section class="view" id="v-fund">
+    <h2>Fundamentales</h2>
+    <p class="sub">Rentabilidad, márgenes, ROIC, flujo de caja, solvencia y valuación, leídos de los estados financieros que la empresa presenta a la SEC. Sin clave: es la misma fuente del 10-K, en formato estructurado.</p>
+    <div class="row">
+      <button id="goFund" class="go">Traer estados financieros</button>
+      <input id="pares" type="text" style="width:230px;text-transform:uppercase" value="AMD,AVGO,INTC,QCOM" aria-label="Pares del sector" title="Los pares los elegís vos: separados por coma">
+      <button id="goPer">PER: empresa, historia y pares</button>
+    </div>
+    <div id="outPer"></div>
+    <div id="outFund"></div>
+  </section>
+
+  <section class="view" id="v-perfil">
+    <h2>Perfil de riesgo</h2>
+    <p class="sub">Cuánto se movió este activo y con qué violencia, medido contra una referencia. <b>Todo lo de acá describe el pasado.</b> Una acción que cayó 40% puede volver a caer 40%, o no: estas cifras acotan expectativas, no predicen.</p>
+    <div class="row">
+      <span class="pill" id="perfilQue">activo: —</span>
+      <input id="bench" type="text" style="width:90px" value="SPY" aria-label="Referencia">
+      <button id="goPerfil">Medir riesgo</button>
+    </div>
+    <div id="outPerfil"></div>
+  </section>
+
+  <section class="view" id="v-criterios">
+    <h2>Mis criterios</h2>
+    <p class="sub">Vos definís los umbrales; la app mide y te dice cuáles se cumplen y cuáles no. <b>La regla es tuya, la aritmética es mía, la decisión también es tuya.</b> Nada de esto predice: todo se calcula sobre lo que ya pasó.</p>
+    <div class="grid" id="umbrales">
+      <div class="cell"><div class="k">Volatilidad anual máx.</div><input id="cVol" type="number" value="50" step="5"><div class="x">% anualizado</div></div>
+      <div class="cell"><div class="k">Caída máxima tolerada</div><input id="cDD" type="number" value="35" step="5"><div class="x">% de drawdown</div></div>
+      <div class="cell"><div class="k">Mín. ventanas positivas</div><input id="cPos" type="number" value="55" step="5"><div class="x">% al horizonte elegido</div></div>
+      <div class="cell"><div class="k">Beta máxima</div><input id="cBeta" type="number" value="2" step="0.1"><div class="x">vs la referencia</div></div>
+      <div class="cell"><div class="k">Máx. días de ±5%</div><input id="cSaltos" type="number" value="5" step="1"><div class="x">% de las ruedas</div></div>
+      <div class="cell"><div class="k">Horizonte</div><select id="cHoriz"><option value="5">5 ruedas</option><option value="10">10 ruedas</option><option value="21" selected>21 ruedas</option><option value="63">63 ruedas</option></select><div class="x">cuánto pensás mantenerlo</div></div>
+    </div>
+    <div class="row"><button id="goCriterios" class="go">Evaluar contra mis criterios</button></div>
+    <div id="outCriterios"></div>
   </section>
 
   <section class="view" id="v-riesgo">
