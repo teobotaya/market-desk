@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Market Desk</title>
+<style>
+:root{
+  --bg:#0d1016; --panel:#141922; --panel2:#1b212c; --line:#252c38; --line2:#333c4b;
+  --ink:#e4e8f0; --muted:#98a2b3; --faint:#6b7486;
+  --up:#3fb27f; --down:#e05c6e; --warn:#e0a04a; --accent:#6c8cff;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+.brand{font-weight:600;letter-spacing:-.01em;margin-right:6px}
+.brand small{display:block;font:11px/1.2 var(--mono);color:var(--faint);letter-spacing:.06em;text-transform:uppercase}
+input,select,button,textarea{font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:7px 10px}
+input[type=text]{width:110px;text-transform:uppercase;font-family:var(--mono)}
+button{cursor:pointer}
+button.go{background:var(--accent);border-color:var(--accent);color:#0b0e14;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);background:var(--panel);overflow-x:auto}
+.tab{padding:9px 13px;border:none;background:none;color:var(--muted);border-bottom:2px solid transparent;border-radius:0;white-space:nowrap}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent)}
+main{padding:18px;max-width:1180px;margin:0 auto}
+.view{display:none}
+.view.on{display:block}
+h2{font-size:19px;margin:0 0 4px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 16px;max-width:72ch}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.cell{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+.cell .k{font:10.5px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.cell .v{font-family:var(--mono);font-size:19px;font-variant-numeric:tabular-nums;margin-top:2px}
+.cell .x{font:11.5px/1.4 var(--mono);color:var(--faint)}
+.up{color:var(--up)}.down{color:var(--down)}.warn{color:var(--warn)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:14px;margin-bottom:16px}
+.card h3{margin:0 0 8px;font-size:15px}
+svg.chart{width:100%;height:260px;display:block}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:10.5px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;padding-right:0;white-space:nowrap}
+textarea{width:100%;min-height:180px;font-family:var(--mono);font-size:12.5px;resize:vertical}
+.dossier{border:1px solid var(--line2);border-radius:9px;overflow:hidden;margin-top:18px}
+.dossier header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px 8px 13px;background:var(--panel2);border-bottom:1px solid var(--line)}
+.dossier header span{font:10.5px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.dossier pre{margin:0;padding:13px;background:#0b0e14;font-family:var(--mono);font-size:12px;line-height:1.58;white-space:pre-wrap;max-height:420px;overflow:auto}
+.pill{display:inline-block;font:11px/1.5 var(--mono);padding:1px 7px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
+.pill.esp{color:var(--warn);border-color:var(--warn)}
+.pill.gen{color:var(--faint)}
+.pill.mix{color:var(--accent);border-color:var(--accent)}
+.msg{padding:11px 13px;border-radius:8px;border:1px solid var(--line2);color:var(--muted);font-size:14px;background:var(--panel)}
+.msg.err{border-color:var(--down);color:var(--down)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.quote{border-left:3px solid var(--down);padding:6px 0 6px 12px;margin:0 0 10px;color:var(--ink);font-size:14px}
+.quote small{display:block;color:var(--faint);font-family:var(--mono);font-size:11px;margin-top:3px}
+.foot{color:var(--faint);font-size:12px;padding:20px 18px 34px;max-width:1180px;margin:0 auto;border-top:1px solid var(--line)}
+@media(max-width:640px){input[type=text]{width:88px}main{padding:14px}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand">Market Desk<small>análisis · sin claves</small></div>
+  <input id="ticker" type="text" value="NVDA" aria-label="Ticker principal">
+  <input id="rival" type="text" value="AMD" aria-label="Ticker competidor">
+  <button class="go" id="load">Cargar</button>
+  <span id="status" class="pill">listo</span>
+</div>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" data-v="panel" aria-selected="true">Panel</button>
+  <button class="tab" role="tab" data-v="tesis" aria-selected="false">Tesis</button>
+  <button class="tab" role="tab" data-v="call" aria-selected="false">Earnings call</button>
+  <button class="tab" role="tab" data-v="foso" aria-selected="false">Foso competitivo</button>
+  <button class="tab" role="tab" data-v="sent" aria-selected="false">Sentimiento</button>
+  <button class="tab" role="tab" data-v="riesgo" aria-selected="false">Riesgos 10-K</button>
+</div>
+
+<main>
+  <section class="view on" id="v-panel">
+    <h2>Panel</h2>
+    <p class="sub">Precio diario de Stooq y las métricas que mira una operativa de corto plazo: momento, volatilidad, ATR para dimensionar el stop, posición frente a las medias y volumen relativo.</p>
+    <div class="grid" id="stats"></div>
+    <div class="card"><h3 id="chartTitle">Precio</h3><svg class="chart" id="chart" viewBox="0 0 900 260" preserveAspectRatio="none"></svg></div>
+  </section>
+
+  <section class="view" id="v-tesis">
+    <h2>Red team de la tesis</h2>
+    <p class="sub">Escribí tu tesis en una o dos frases. La app la empaqueta con los datos de precio y los titulares recientes, y arma el prompt para que un modelo busque lo que la refutaría — no lo que la confirma.</p>
+    <textarea id="tesis" placeholder="Ej: Compro NVDA a dos semanas porque el guidance de la última call superó lo esperado y el sector viene de una corrección exagerada."></textarea>
+    <div class="row" style="margin-top:10px"><button id="genTesis">Armar dossier</button></div>
+    <div id="outTesis"></div>
+  </section>
+
+  <section class="view" id="v-call">
+    <h2>Transcripción de la call</h2>
+    <p class="sub">Pegá la transcripción. El análisis léxico corre acá mismo: detecta las frases con lenguaje prospectivo, mide el tono, marca las tres citas más negativas y estima la dirección de la guía. El prompt de abajo es para profundizarlo con un modelo.</p>
+    <textarea id="transcript" placeholder="Pegá acá la transcripción completa de la earnings call…"></textarea>
+    <div class="row" style="margin-top:10px"><button id="genCall">Analizar</button></div>
+    <div id="outCall"></div>
+  </section>
+
+  <section class="view" id="v-foso">
+    <h2>Estrés del foso competitivo</h2>
+    <p class="sub">Compara la empresa contra el competidor que cargaste arriba, en los tres ejes que aguantan un foso: poder de fijación de precios, costes de cambio y propiedad intelectual. Los datos de precio dan el contexto; el juicio lo aporta el modelo.</p>
+    <div id="outFoso"></div>
+  </section>
+
+  <section class="view" id="v-sent">
+    <h2>Sentimiento del sector</h2>
+    <p class="sub">Titulares de las últimas semanas vía Google News, con una puntuación léxica por titular. Sirve para ver el clima y la concentración de noticias, no para decidir: un lexicón no entiende ironía ni contexto.</p>
+    <div class="row">
+      <input id="q" type="text" style="width:260px;text-transform:none" value="semiconductores" aria-label="Consulta de noticias">
+      <select id="days"><option value="7">7 días</option><option value="14" selected>14 días</option><option value="30">30 días</option></select>
+      <button id="goNews">Buscar</button>
+    </div>
+    <div id="outSent"></div>
+  </section>
+
+  <section class="view" id="v-riesgo">
+    <h2>Factores de riesgo del 10-K</h2>
+    <p class="sub">Baja el último 10-K de la SEC, aísla el Item 1A y separa los riesgos específicos de la empresa —concentración de clientes, proveedor único, exposición geográfica— del boilerplate genérico que aparece en todos los informes del mercado.</p>
+    <div class="row"><button id="goRisk">Traer el 10-K</button></div>
+    <div id="outRisk"></div>
+  </section>
+</main>
+
+<p class="foot">
+  Herramienta de análisis: reúne datos públicos y arma dossieres. <b>No emite recomendaciones de compra o venta ni constituye asesoramiento financiero.</b>
+  Los precios de Stooq son de cierre diario, no en tiempo real. La puntuación de titulares es un lexicón simple y se equivoca con facilidad.
+  Verificá siempre contra la fuente antes de operar.
+</p>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "market-desk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mesa de análisis para operativa de corto plazo: precio, filings, noticias y dossieres listos para analizar con un modelo.",
+  "license": "MIT",
+  "author": "Teo Matías Botaya",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs"
+  }
+}
