@@ -1,14 +1,17 @@
 {
   "name": "market-desk",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Mesa de análisis para operativa de corto plazo: precio, filings, noticias y dossieres listos para analizar con un modelo.",
+  "description": "Mesa de análisis para analistas de mercado: precios, técnico, fundamentales SEC, consenso, Argentina (dólar, riesgo país, tasas, BYMA), macro global y dossieres listos para analizar con IA. Sin dependencias.",
   "license": "MIT",
   "author": "Teo Matías Botaya",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "dev": "node server.mjs",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test": "node --test"
   }
 }
