@@ -9,13 +9,14 @@ import { riskFactors, fundamentales, perCompleto, filings, insiders, buscarSec, 
 import * as bonos from "./lib/bonos.mjs";
 import * as carteras from "./lib/carteras.mjs";
 import * as clientes from "./lib/clientes.mjs";
+import * as rf from "./lib/rentafija.mjs";
 import { news } from "./lib/noticias.mjs";
 import * as ar from "./lib/argentina.mjs";
 import * as mkt from "./lib/mercado.mjs";
 import { analizar, estadoIA } from "./lib/ia.mjs";
 import { volatilidadImplicita, finnhubActivo, finnhubResumen } from "./lib/extras.mjs";
 
-const VERSION = "2.1.0";
+const VERSION = "2.2.0";
 const p = (u, k, def = "") => (u.searchParams.get(k) || def).trim();
 
 async function precioConMoneda(u) {
@@ -120,6 +121,12 @@ const routes = {
   "/api/ar/bcra": () => ar.variablesBcra(),
   "/api/ar/bonos": () => bonos.bonosDolar(),
   "/api/ar/bono": (u) => bonos.bonoDetalle(p(u, "t")),
+  "/api/ar/tasafija": () => rf.tasaFija(),
+  "/api/ar/ons": () => rf.obligaciones(),
+  "/api/ar/dolar-nuevos": () => rf.dolarNuevos(),
+  "/api/ar/breakevens": () => rf.breakevens(),
+  "/api/ar/cedears": () => rf.cedears(),
+  "/api/ar/metodologia": () => ({ filas: rf.METODOLOGIA }),
 
   /* ---------------------------------------------------- estados y carteras */
   "/api/estados": (u) => estadosFinancieros(p(u, "t")),

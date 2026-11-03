@@ -1,5 +1,5 @@
 import { esc, enlace, num, pct, pctS, precio, grande, cls, cargando, errorHtml, api, tarjeta, kpi, fecha, fechaHora, subtabs, enlazarSubtabs, tablaOrdenable, pref, setPref } from "../util.js";
-import { sparkline, graficoLineas, graficoBarras } from "../charts.js";
+import { sparkline, graficoLineas, graficoBarras, graficoDispersion } from "../charts.js";
 import { dossier } from "../dossier.js";
 import { medidasBono, precioDesdeTir } from "../finanzas.js";
 
@@ -9,18 +9,18 @@ export default {
   id: "argentina",
   titulo: "Argentina",
   icono: "◈",
-  descripcion: "Dólares y brecha, riesgo país, inflación y expectativas del REM, bonos soberanos en dólares con TIR, duration y paridad, tasas en pesos, letras y bonos CER con sus curvas, y los paneles de BYMA. Fuentes gratuitas: DolarApi, ArgentinaDatos, data912 y BCRA.",
+  descripcion: "Dólares y brecha, riesgo país, inflación y REM; bonos soberanos y obligaciones negociables en dólares con TIR, duration, paridad y spread; tasa fija y CER con inflación implícita; carry contra la banda cambiaria; dólar implícito en CEDEARs; paneles de BYMA. Las tasas se calculan en la app con precios de data912 y flujos de las condiciones de emisión.",
 
   async render(el, ctx) {
     const activa = pref("ar.tab", "macro");
-    el.innerHTML = `${subtabs("ar", [["macro", "Dólar y macro"], ["bonos", "Bonos en dólares"], ["tasas", "Tasas y renta fija en pesos"], ["byma", "Panel BYMA"]], activa)}<div data-tab></div>`;
+    el.innerHTML = `${subtabs("ar", [["macro", "Dólar y macro"], ["bonos", "Bonos en dólares"], ["ons", "Obligaciones negociables"], ["tasas", "Tasas y renta fija en pesos"], ["breakevens", "Breakevens y carry"], ["cedears", "CEDEARs"], ["byma", "Panel BYMA"]], activa)}<div data-tab></div>`;
     const cont = el.querySelector("[data-tab]");
     const abrir = (k) => {
       setPref("ar.tab", k);
       cont.innerHTML = "";
       const div = document.createElement("div");
       cont.appendChild(div);
-      ({ macro, bonos, tasas, byma })[k](div, ctx);
+      (({ macro, bonos, ons, tasas, breakevens, cedears, byma })[k] || macro)(div, ctx);
     };
     enlazarSubtabs(el, "ar", abrir);
     abrir(activa);
@@ -168,29 +168,35 @@ async function tasas(el) {
       <p class="nota">${esc(d.fuente)}. La TNA de los FCI sale de la variación de la cuotaparte entre los dos últimos días informados: es ruidosa día a día.</p>`);
   }).catch((e) => { el.querySelector("[data-pf]").innerHTML = tarjeta("Tasas", errorHtml(e)); el.querySelector("[data-fci]").innerHTML = ""; });
 
+  /* Tasa fija calculada en la app: precio de data912 y pago final de las
+     condiciones de emisión. Lo que no está en la tabla propia viene de
+     ArgentinaDatos y se marca. Los datos imposibles quedan en gris. */
+  const fija = api("/api/ar/tasafija").then((d) => {
+    R.fija = d;
+    const l = el.querySelector("[data-letras]");
+    if (!d.filas.length) { l.innerHTML = tarjeta("Tasa fija (LECAP y BONCAP)", `<div class="msg">Sin datos de letras ahora.</div>`); return; }
+    const dudosas = d.filas.filter((f) => f.dudosa);
+    l.innerHTML = tarjeta("Tasa fija (LECAP y BONCAP)", `<div data-g></div><div data-t></div><p class="nota">Curva: TEM según plazo (escala logarítmica). TEM = (pago final / precio)^(30/días) − 1, con liquidación ${fecha(d.fechaLiq)}. ${dudosas.length ? `En gris y fuera de la curva: ${dudosas.map((x) => esc(x.ticker)).join(", ")} (vencen en menos de 5 días o la tasa es imposible para una letra).` : ""} ${esc(d.fuente)}.</p>`);
+    graficoLineas(l.querySelector("[data-g]"), [{ nombre: "TEM", datos: d.curva.map((x) => ({ x: x.dias, v: x.tem, etiqueta: x.ticker })), color: "var(--c1)", puntos: true, etiquetas: true }], { xNum: true, escalaX: "log", alto: 200, fmtY: (v) => `${num(v, 2)}%`, etiquetasX: marcasPlazo(d.curva) });
+    tablaOrdenable(l.querySelector("[data-t]"), {
+      columnas: [{ k: "ticker", t: "Ticker", fmt: (v, f) => `<b>${esc(v)}</b><span class="sub">${esc(f.tipo)}${f.fuente !== "propia" ? " · ArgentinaDatos" : ""}</span>` }, { k: "precio", t: "Precio", n: true, fmt: (v) => num(v, 3) }, { k: "pagoFinal", t: "Pago final", n: true, fmt: (v) => num(v, 3) }, { k: "tem", t: "TEM", n: true, fmt: (v) => pct(v, 2) }, { k: "tea", t: "TEA", n: true, fmt: (v) => pct(v, 2) }, { k: "tna", t: "TNA", n: true, fmt: (v) => pct(v, 2) }, { k: "dias", t: "Días", n: true, fmt: (v) => num(v, 0) }, { k: "vence", t: "Vence", n: true, fmt: fecha }],
+      filas: d.filas, nombreCsv: "tasa-fija", claseFila: (f) => (f.dudosa ? "faint" : "")
+    });
+  }).catch((e) => { el.querySelector("[data-letras]").innerHTML = tarjeta("Tasa fija", errorHtml(e)); });
+
   const rf = api("/api/ar/rentafija").then((d) => {
     R.rf = d;
-    const l = el.querySelector("[data-letras]");
-    if (d.letras?.length) {
-      const k = curva(d.letras, "tea");
-      l.innerHTML = tarjeta("Letras del Tesoro (LECAP/BONCAP)", `<div data-g></div><div data-t></div><p class="nota">Curva: TEA según plazo (escala logarítmica). ${notaFuera(k.fuera)} Actualizado ${esc(fechaHora(d.letrasFecha))}.</p>`);
-      graficoLineas(l.querySelector("[data-g]"), [{ nombre: "TEA", datos: k.dentro.map((x) => ({ x: x.dias, v: x.tea, etiqueta: x.ticker })), color: "var(--c1)", puntos: true, etiquetas: true }], { xNum: true, escalaX: "log", alto: 200, fmtY: (v) => `${num(v, 1)}%`, etiquetasX: marcasPlazo(k.dentro) });
-      tablaOrdenable(l.querySelector("[data-t]"), {
-        columnas: [{ k: "ticker", t: "Ticker" }, { k: "precio", t: "Precio", n: true, fmt: (v) => num(v, 2) }, { k: "tna", t: "TNA", n: true, fmt: (v) => pct(v, 2) }, { k: "tea", t: "TEA", n: true, fmt: (v) => pct(v, 2) }, { k: "tem", t: "TEM", n: true, fmt: (v) => pct(v, 2) }, { k: "dias", t: "Días", n: true }, { k: "vencimiento", t: "Vence", n: true, fmt: fecha }],
-        filas: d.letras, nombreCsv: "letras", claseFila: (f) => (k.fuera.includes(f) ? "faint" : "")
-      });
-    } else l.innerHTML = tarjeta("Letras del Tesoro", `<div class="msg">Sin datos de letras ahora.</div>`);
     const c = el.querySelector("[data-cer]");
     if (d.cer?.length) {
       const k = curva(d.cer, "tir");
-      c.innerHTML = tarjeta("Bonos ajustados por CER", `<div data-g></div><div data-t></div><p class="nota">TIR real (por encima de la inflación) según plazo, escala logarítmica. ${notaFuera(k.fuera)} Actualizado ${esc(fechaHora(d.cerFecha))}.</p>`);
+      c.innerHTML = tarjeta("Bonos ajustados por CER", `<div data-g></div><div data-t></div><p class="nota">TIR real (por encima de la inflación) según plazo, escala logarítmica. ${notaFuera(k.fuera)} Actualizado ${esc(fechaHora(d.cerFecha))}. Fuente: ArgentinaDatos, que mezcla bonos CER puros con duales CER/TAMAR: tomalo como referencia y cotejá las TIR atípicas.</p>`);
       graficoLineas(c.querySelector("[data-g]"), [{ nombre: "TIR real", datos: k.dentro.map((x) => ({ x: x.dias, v: x.tir, etiqueta: x.ticker })), color: "var(--c4)", puntos: true, etiquetas: true }], { xNum: true, escalaX: "log", alto: 200, cero: true, fmtY: (v) => `${num(v, 1)}%`, etiquetasX: marcasPlazo(k.dentro) });
       tablaOrdenable(c.querySelector("[data-t]"), {
         columnas: [{ k: "ticker", t: "Ticker" }, { k: "precio", t: "Precio", n: true, fmt: (v) => num(v, 2) }, { k: "tir", t: "TIR real", n: true, fmt: (v) => pct(v, 2), cls: cls }, { k: "dias", t: "Días", n: true }, { k: "vencimiento", t: "Vence", n: true, fmt: fecha }],
         filas: d.cer, nombreCsv: "bonos-cer", claseFila: (f) => (k.fuera.includes(f) ? "faint" : "")
       });
     } else c.innerHTML = tarjeta("Bonos CER", `<div class="msg">Sin datos de bonos CER ahora.</div>`);
-  }).catch((e) => { el.querySelector("[data-letras]").innerHTML = tarjeta("Renta fija", errorHtml(e)); el.querySelector("[data-cer]").innerHTML = ""; });
+  }).catch((e) => { el.querySelector("[data-cer]").innerHTML = tarjeta("Bonos CER", errorHtml(e)); });
 
   const imp = api("/api/ar/implicito").then((d) => {
     R.implicito = d;
@@ -200,7 +206,7 @@ async function tasas(el) {
     c.innerHTML = `<div class="grid2 bloque">${tarjeta("Dólar MEP implícito por bono", tabla(d.mep))}${tarjeta("Dólar CCL implícito por bono", tabla(d.ccl))}</div><p class="nota">${esc(d.fuente)}. Precio del bono en pesos dividido por su precio en dólares (especie D para MEP, C para CCL).</p>`;
   }).catch((e) => { el.querySelector("[data-implicito]").innerHTML = tarjeta("Dólar implícito", errorHtml(e)); });
 
-  await Promise.allSettled([t, rf, imp]);
+  await Promise.allSettled([t, fija, rf, imp]);
   const prompt =
 `Analizá la curva de tasas en pesos de Argentina con estos datos.
 
@@ -210,8 +216,8 @@ ${R.tasas?.depositos30 ? `Depósitos a 30 días (promedio): ${pct(R.tasas.deposi
 ${R.tasas?.plazoFijo?.length ? `Plazo fijo: mejor ${pct(R.tasas.plazoFijo[0].tnaClientes, 2)} (${R.tasas.plazoFijo[0].entidad}), mediana de bancos ${pct(R.tasas.plazoFijo[Math.floor(R.tasas.plazoFijo.length / 2)].tnaClientes, 2)}` : ""}
 ${R.tasas?.fci?.length ? `FCI money market: entre ${pct(R.tasas.fci.at(-1).tna, 1)} y ${pct(R.tasas.fci[0].tna, 1)} TNA` : ""}
 
-LETRAS (TEA por plazo)
-${R.rf?.letras?.map((x) => `- ${x.ticker}: ${x.dias} días · TNA ${pct(x.tna, 2)} · TEA ${pct(x.tea, 2)} · TEM ${pct(x.tem, 2)}`).join("\n") || "(sin datos)"}
+LETRAS DE TASA FIJA (calculadas desde el pago final)
+${R.fija?.curva?.map((x) => `- ${x.ticker}: ${num(x.dias, 0)} días · TNA ${pct(x.tna, 2)} · TEA ${pct(x.tea, 2)} · TEM ${pct(x.tem, 2)}`).join("\n") || "(sin datos)"}
 
 BONOS CER (TIR real)
 ${R.rf?.cer?.map((x) => `- ${x.ticker}: ${x.dias} días · TIR ${pct(x.tir, 2)}`).join("\n") || "(sin datos)"}
@@ -325,9 +331,13 @@ async function bonos(el, ctx) {
         ${d.spreads.map((x) => `<tr><td><b>${esc(x.local)}</b> / ${esc(x.ny)}</td><td class="n ${x.puntosBasicos > 0 ? "warn" : ""}">${num(x.puntosBasicos, 0)} pb</td><td class="n">${num(x.ratioPrecio * 100, 2)}%</td></tr>`).join("")}</tbody></table>
         <p class="nota">Cuánto más rinde el bono de ley argentina que su par de ley de Nueva York con los mismos flujos: es la prima que pide el mercado por la legislación local.</p>` : `<p class="vacio">Sin pares con cotización.</p>`)}
     </div>
+    <div data-nuevos></div>
     <div data-ficha></div>
     <div data-arb></div>
-    <div data-ia></div>`;
+    <div data-ia></div>
+    <div data-metodo></div>`;
+  otrosDolar(el.querySelector("[data-nuevos]"));
+  metodologia(el.querySelector("[data-metodo]"));
 
   tablaOrdenable(el.querySelector("[data-t]"), {
     columnas: [
@@ -395,6 +405,8 @@ async function ficha(el, ticker, desplazar = false) {
           <label class="campo"><span>TIR (%)</span><input data-calc-tir type="number" step="any" value="${b.tir ? b.tir.toFixed(2) : ""}"></label>
         </div>
         <p class="nota" data-calc-res>Cambiá el precio para ver la TIR, o la TIR para ver el precio.</p>
+        <div class="grupo-titulo" style="margin-top:12px">Escenarios de tasa</div>
+        <div data-escenarios></div>
         <div class="grupo-titulo" style="margin-top:12px">TIR y paridad en el último año</div>
         <div data-hist></div>
         ${b.aviso ? `<p class="nota">${esc(b.aviso)}</p>` : ""}
@@ -420,6 +432,13 @@ async function ficha(el, ticker, desplazar = false) {
     ip.value = p.toFixed(2);
     out.innerHTML = `Para una TIR de ${pct(Number(it.value), 2)} el precio sería <b>${num(p, 2)}</b> (paridad ${pct((p / b.vt) * 100, 1)}; ${pctS((p / b.precio - 1) * 100, 1)} contra el precio actual).`;
   });
+  /* Precio exacto con cada TIR (no la aproximación por duration). */
+  if (b.tir !== null && b.tir !== undefined) {
+    const pasos = [-300, -200, -100, -50, 50, 100, 200, 300];
+    cont.querySelector("[data-escenarios]").innerHTML = `<table><thead><tr><th>Cambio de TIR</th><th class="n">TIR</th><th class="n">Precio</th><th class="n">Variación</th><th class="n">Por duration</th></tr></thead><tbody>
+      ${pasos.map((pb) => { const p = precioDesdeTir(flujos, b.tir + pb / 100, b.fechaLiq); const v = (p / b.precio - 1) * 100; return `<tr><td>${pb > 0 ? "+" : ""}${pb} pb</td><td class="n">${pct(b.tir + pb / 100, 2)}</td><td class="n">${num(p, 2)}</td><td class="n ${cls(v)}">${pctS(v, 1)}</td><td class="n faint">${pctS(-b.md * pb / 100, 1)}</td></tr>`; }).join("")}</tbody></table>
+      <p class="nota">Precio recalculado con cada TIR. La última columna es la aproximación lineal (−MD × cambio): la diferencia es la convexidad.</p>`;
+  }
   if (b.historia.length) {
     graficoLineas(cont.querySelector("[data-hist]"), [
       { nombre: "TIR", datos: b.historia.map((x) => ({ d: x.d, v: x.tir })), color: "var(--c1)" }
@@ -448,4 +467,138 @@ function arbitraje(el, d) {
     cont.querySelector("[data-b]").addEventListener("change", (e) => { b = e.target.value; setPref("ar.arbB", b); pintar(); });
   };
   pintar();
+}
+
+
+/* Bonares 2027–2029 y BOPREAL: soberanos en dólares emitidos fuera del canje. */
+async function otrosDolar(cont) {
+  try {
+    const d = await api("/api/ar/dolar-nuevos");
+    if (!d.filas.length) return;
+    cont.innerHTML = tarjeta("Otros soberanos en dólares", `<div data-t></div><p class="nota">Bonares emitidos desde 2025 y BOPREAL del BCRA, con sus flujos futuros cada 100 nominales. ${esc(d.fuente)}.</p>`);
+    tablaOrdenable(cont.querySelector("[data-t]"), {
+      columnas: [
+        { k: "ticker", t: "Bono", fmt: (v, f) => `<b>${esc(v)}</b><span class="sub">${esc(f.nombre)} · vence ${fecha(f.vence)}</span>` },
+        { k: "precio", t: "Precio US$", n: true, fmt: (v, f) => (v ? `${num(v, 2)}<span class="sub">${esc(f.especie || "")}</span>` : `<span class="faint">sin cotización</span>`) },
+        { k: "variacion", t: "Día", n: true, fmt: (v) => pctS(v, 2), cls },
+        { k: "tir", t: "TIR", n: true, fmt: (v) => pct(v, 2) },
+        { k: "md", t: "MD", n: true, fmt: (v) => num(v, 2) },
+        { k: "convexidad", t: "Convex.", n: true, fmt: (v) => num(v, 1) },
+        { k: "proximoPago", t: "Próximo pago", n: true, fmt: (v) => (v ? `${fecha(v.fecha)}<span class="sub">${num(v.total, 3)} c/100</span>` : "—"), csv: (v) => v?.fecha || "" }
+      ],
+      filas: d.filas, nombreCsv: "soberanos-usd-nuevos"
+    });
+  } catch { cont.innerHTML = ""; }
+}
+
+/* Cómo se calcula cada número: el analista tiene que poder reproducirlo. */
+async function metodologia(cont) {
+  try {
+    const d = await api("/api/ar/metodologia");
+    cont.innerHTML = tarjeta("Metodología y convenciones", `<table><tbody>${d.filas.map(([k, v]) => `<tr><td style="width:190px"><b>${esc(k)}</b></td><td>${esc(v)}</td></tr>`).join("")}</tbody></table>`);
+  } catch { cont.innerHTML = ""; }
+}
+
+/* ------------------------------------------- obligaciones negociables */
+
+async function ons(el) {
+  el.innerHTML = cargando("Calculando TIR y spread de las obligaciones negociables…");
+  let d;
+  try { d = await api("/api/ar/ons"); } catch (e) { el.innerHTML = errorHtml(e); return; }
+  const validas = d.filas.filter((f) => !f.dudosa && f.tir !== null);
+  const spreads = validas.map((f) => f.spread).filter(Number.isFinite);
+  el.innerHTML = `
+    <div class="kpis compactos">
+      ${kpi("Con cotización", `${validas.length} de ${d.filas.length}`, "obligaciones en dólares MEP")}
+      ${validas.length ? kpi("TIR mediana", pct(mediana(validas.map((f) => f.tir)), 2)) : ""}
+      ${spreads.length ? kpi("Spread mediano", `${num(mediana(spreads), 0)} pb`, "contra Globales a igual duration") : ""}
+      ${kpi("Liquidación", fecha(d.fechaLiq), "T+1")}
+    </div>
+    ${tarjeta("TIR según duration: ONs contra la curva soberana", `<div data-g></div><div class="leyenda"><span><i style="background:var(--c3)"></i>Obligaciones negociables</span><span><i style="background:var(--c1)"></i>Globales (ley Nueva York)</span></div>`)}
+    ${tarjeta("Obligaciones negociables en dólares", `<div data-t></div><p class="nota">Precio de la especie D (dólar MEP) cada 100 nominales. Spread = TIR de la ON − TIR de los Globales interpolada a la misma duration modificada: negativo significa que la ON rinde menos que el soberano. En gris, precios sin operaciones o TIR fuera de rango. ${esc(d.fuente)}.</p>`)}`;
+  graficoDispersion(el.querySelector("[data-g]"), [], [
+    ...validas.map((f) => ({ x: f.md, y: f.tir, etiqueta: f.ticker.replace(/D$/, ""), color: "var(--c3)", r: 4 })),
+    ...d.curvaSoberana.map((f) => ({ x: f.md, y: f.tir, etiqueta: f.ticker, color: "var(--c1)", r: 5 }))
+  ], { alto: 300, fmtX: (v) => num(v, 1), fmtY: (v) => `${num(v, 1)}%`, nombreX: "Duration modificada", nombreY: "TIR", etiquetaX: "duration modificada", etiquetaY: "TIR %" });
+  tablaOrdenable(el.querySelector("[data-t]"), {
+    columnas: [
+      { k: "ticker", t: "ON", fmt: (v, f) => `<b>${esc(v)}</b><span class="sub">${esc(f.emisor)} · vence ${fecha(f.vence)}</span>` },
+      { k: "precio", t: "Precio US$", n: true, fmt: (v) => (v ? num(v, 2) : `<span class="faint">sin precio</span>`) },
+      { k: "variacion", t: "Día", n: true, fmt: (v) => pctS(v, 2), cls },
+      { k: "tir", t: "TIR", n: true, fmt: (v) => pct(v, 2) },
+      { k: "spread", t: "Spread", n: true, fmt: (v) => (Number.isFinite(v) ? `${num(v, 0)} pb` : "—"), cls: (v) => (v < 0 ? "warn" : "") },
+      { k: "md", t: "MD", n: true, fmt: (v) => num(v, 2) },
+      { k: "duration", t: "Duration", n: true, fmt: (v) => num(v, 2) },
+      { k: "volumen", t: "Volumen", n: true, fmt: grande },
+      { k: "proximoPago", t: "Próximo pago", n: true, fmt: (v) => (v ? `${fecha(v.fecha)}<span class="sub">${num(v.total, 3)} c/100</span>` : "—"), csv: (v) => v?.fecha || "" }
+    ],
+    filas: [...validas, ...d.filas.filter((f) => !validas.includes(f))], filtro: true, limite: 25, nombreCsv: "obligaciones-negociables", claseFila: (f) => (f.dudosa ? "faint" : "")
+  });
+}
+
+/* --------------------------------------------- breakevens y carry */
+
+async function breakevens(el) {
+  el.innerHTML = cargando("Calculando inflación implícita y carry contra la banda…");
+  let d;
+  try { d = await api("/api/ar/breakevens"); } catch (e) { el.innerHTML = errorHtml(e); return; }
+  const b = d.banda;
+  el.innerHTML = `
+    <div class="kpis compactos">
+      ${kpi("Dólar mayorista", d.mayorista ? `$ ${num(d.mayorista, 2)}` : "—", "referencia del carry")}
+      ${kpi("Techo de la banda", b.techo ? `$ ${num(b.techo, 2)}` : "—", b.fecha ? `BCRA · ${fecha(b.fecha)}` : "sin dato del BCRA")}
+      ${kpi("Distancia al techo", b.distanciaTecho !== null ? pct(b.distanciaTecho, 1) : "—", "cuánto puede subir el mayorista", b.distanciaTecho !== null && b.distanciaTecho < 5 ? "warn" : "")}
+      ${kpi("Piso de la banda", b.piso ? `$ ${num(b.piso, 2)}` : "—", b.distanciaPiso !== null ? `${pct(b.distanciaPiso, 1)} por encima` : "")}
+      ${d.remPromedio !== null ? kpi("Inflación esperada (REM)", `${pct(d.remPromedio, 2)} mensual`, "mediana, próximos meses") : ""}
+    </div>
+    ${d.avisos.length ? `<div class="msg">${d.avisos.map(esc).join(" ")}</div>` : ""}
+    <div class="grid2">
+      ${tarjeta("Inflación implícita: tasa fija contra CER", `<div data-g></div><div data-t></div><p class="nota">Inflación que iguala lo que paga cada letra de tasa fija con un bono CER del mismo plazo: (1 + TEA) / (1 + TIR real) − 1. Si la inflación termina por encima, conviene el CER; por debajo, la tasa fija. La línea punteada es la mediana del REM.</p>`)}
+      ${tarjeta("Carry contra la banda cambiaria", `<div data-c></div><p class="nota">El techo se proyecta solo hasta 18 meses. Dólar de equilibrio: el mayorista al vencimiento con el que la letra empata con haber comprado dólares hoy, mayorista × (1 + TEM)^(días/30). Si queda por encima del techo proyectado de la banda, la letra le gana al dólar aun en el peor caso dentro del régimen. El techo sube cada mes lo que dio la inflación de dos meses antes (INDEC y después REM).</p>`)}
+    </div>
+    <p class="nota">${esc(d.fuente)}.</p>`;
+  if (d.implicita.length) {
+    graficoLineas(el.querySelector("[data-g]"), [
+      { nombre: "Inflación implícita mensual", datos: d.implicita.map((x) => ({ x: x.dias, v: x.mensual, etiqueta: x.ticker })), color: "var(--c2)", puntos: true, etiquetas: true },
+      ...(d.remPromedio !== null ? [{ nombre: "REM", datos: d.implicita.map((x) => ({ x: x.dias, v: d.remPromedio })), color: "var(--faint)", punteada: true }] : [])
+    ], { xNum: true, alto: 200, fmtY: (v) => `${num(v, 2)}%`, etiquetasX: marcasPlazo(d.implicita) });
+    el.querySelector("[data-t]").innerHTML = `<table><thead><tr><th>Letra</th><th class="n">Días</th><th class="n">TEA</th><th class="n">TIR real CER</th><th class="n">Implícita anual</th><th class="n">Mensual</th></tr></thead><tbody>
+      ${d.implicita.map((x) => `<tr><td><b>${esc(x.ticker)}</b></td><td class="n">${num(x.dias, 0)}</td><td class="n">${pct(x.tea, 2)}</td><td class="n">${pct(x.tirReal, 2)}</td><td class="n">${pct(x.anual, 1)}</td><td class="n ${d.remPromedio !== null && x.mensual > d.remPromedio ? "warn" : ""}"><b>${pct(x.mensual, 2)}</b></td></tr>`).join("")}</tbody></table>`;
+  } else el.querySelector("[data-g]").innerHTML = `<p class="vacio">Sin curva CER o sin letras de tasa fija con precio.</p>`;
+  const c = el.querySelector("[data-c]");
+  if (d.carry.length) {
+    c.innerHTML = `<table><thead><tr><th>Letra</th><th class="n">Vence</th><th class="n">TEM</th><th class="n">Dólar de equilibrio</th><th class="n">Suba tolerada</th><th class="n">Techo proyectado</th><th class="n">Contra el techo</th></tr></thead><tbody>
+      ${d.carry.map((x) => `<tr><td><b>${esc(x.ticker)}</b></td><td class="n">${fecha(x.vence)}</td><td class="n">${pct(x.tem, 2)}</td><td class="n">$ ${num(x.dolarEquilibrio, 2)}</td><td class="n">${pct(x.subaTolerada, 1)}</td><td class="n">${x.techo ? `$ ${num(x.techo, 2)}` : "—"}</td><td class="n ${x.margenTecho === null ? "" : x.margenTecho >= 0 ? "up" : "down"}">${x.margenTecho === null ? "—" : pctS(x.margenTecho, 1)}</td></tr>`).join("")}</tbody></table>`;
+  } else c.innerHTML = `<p class="vacio">Sin dólar mayorista o sin letras con precio.</p>`;
+}
+
+/* ------------------------------------------------------------ CEDEARs */
+
+async function cedears(el, ctx) {
+  el.innerHTML = cargando("Calculando el dólar implícito en cada CEDEAR…");
+  let d;
+  try { d = await api("/api/ar/cedears"); } catch (e) { el.innerHTML = errorHtml(e); return; }
+  const meps = d.filas.map((f) => f.mepImplicito).filter(Number.isFinite), ccls = d.filas.map((f) => f.cclImplicito).filter(Number.isFinite);
+  el.innerHTML = `
+    <div class="kpis compactos">
+      ${kpi("MEP de referencia", d.mepRef ? `$ ${num(d.mepRef, 2)}` : "—")}
+      ${meps.length ? kpi("MEP implícito mediano", `$ ${num(mediana(meps), 2)}`, `${meps.length} CEDEARs con especie D`) : ""}
+      ${kpi("CCL de referencia", d.cclRef ? `$ ${num(d.cclRef, 2)}` : "—")}
+      ${ccls.length ? kpi("CCL implícito mediano", `$ ${num(mediana(ccls), 2)}`, `${ccls.length} con precio en Nueva York`) : ""}
+    </div>
+    ${tarjeta("Dólar implícito por CEDEAR", `<div data-t></div><p class="nota">MEP implícito = precio en pesos / precio de la especie D. CCL implícito = precio en pesos × ratio / precio de la acción en Nueva York (solo los 20 de más volumen; los horarios de cierre no coinciden, así que es aproximado). Un desvío negativo indica que el CEDEAR está barato en pesos contra el dólar de referencia. ${esc(d.fuente)}.</p>`)}`;
+  tablaOrdenable(el.querySelector("[data-t]"), {
+    columnas: [
+      { k: "ticker", t: "CEDEAR", fmt: (v, f) => `<b>${esc(v)}</b><span class="sub">${esc(f.subyacente)} · ratio ${num(f.ratio, f.ratio % 1 ? 2 : 0)}</span>` },
+      { k: "precio", t: "Precio $", n: true, fmt: precio },
+      { k: "variacion", t: "Día", n: true, fmt: (v) => pctS(v, 2), cls },
+      { k: "mepImplicito", t: "MEP implícito", n: true, fmt: (v) => (v ? `$ ${num(v, 2)}` : "—") },
+      { k: "desvioMep", t: "Desvío MEP", n: true, fmt: (v) => pctS(v, 2), cls },
+      { k: "cclImplicito", t: "CCL implícito", n: true, fmt: (v) => (v ? `$ ${num(v, 2)}` : "—") },
+      { k: "desvioCcl", t: "Desvío CCL", n: true, fmt: (v) => pctS(v, 2), cls },
+      { k: "volumen", t: "Volumen", n: true, fmt: grande }
+    ],
+    filas: d.filas, filtro: true, nombreCsv: "cedears-implicito",
+    alClick: (f) => ctx.cargarTicker(`${f.ticker}.BA`, "cotizacion")
+  });
 }

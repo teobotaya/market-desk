@@ -1,6 +1,6 @@
 {
   "name": "market-desk",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "description": "Mesa de análisis para analistas de mercado: precios, técnico, fundamentales SEC, consenso, Argentina (dólar, riesgo país, tasas, BYMA), macro global y dossieres listos para analizar con IA. Sin dependencias.",

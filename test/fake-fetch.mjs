@@ -10,6 +10,7 @@
    Uso: node --import ./test/fake-fetch.mjs server.mjs  (o importarlo en un test). */
 
 import fs from "node:fs";
+import { TASA_FIJA, ONS, DOLAR_NUEVOS } from "../lib/instrumentos.mjs";
 
 const AR = JSON.parse(fs.readFileSync(new URL("./fixtures/argentina.json", import.meta.url), "utf8"));
 export const llamadas = [];
@@ -278,19 +279,35 @@ function rss() {
 /* Precios sintéticos en dólares por cada 100 nominales, cerca de su valor técnico. */
 const BONOS_USD = { AL29: 58, GD29: 59, AL30: 61, GD30: 62, AL35: 74, GD35: 76, AE38: 78, GD38: 80, AL41: 67, GD41: 69, GD46: 73 };
 
+/* Precio sintético de un instrumento con flujos conocidos: sus flujos
+   futuros descontados a una tasa fija (así la TIR calculada es conocida). */
+const hoyF = () => new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+const valorPresente = (flujos, tasa) => flujos.filter(([f]) => f > hoyF()).reduce((s, [f, m]) => s + m / (1 + tasa) ** ((Date.parse(f) - Date.parse(hoyF())) / 864e5 / 365), 0);
+export const TIR_SINTETICA = { ons: 0.075, nuevos: 0.07, temLecap: 0.022 };
+
+function precioSintetico(tipo, s) {
+  const usd = BONOS_USD[s.replace(/D$/, "")];
+  if (tipo === "arg_bonds" && usd) return s.endsWith("D") ? usd : usd * 1570;
+  if (TASA_FIJA[s]) return TASA_FIJA[s].pagoFinal / (1 + TIR_SINTETICA.temLecap) ** (((Date.parse(TASA_FIJA[s].vence) - Date.parse(hoyF())) / 864e5) / 30);
+  if (tipo === "arg_corp" && ONS[s]) return valorPresente(ONS[s].flujos, TIR_SINTETICA.ons);
+  const nuevo = DOLAR_NUEVOS[s.replace(/D$/, "")];
+  if (tipo === "arg_bonds" && nuevo) return s.endsWith("D") ? valorPresente(nuevo.flujos, TIR_SINTETICA.nuevos) : valorPresente(nuevo.flujos, TIR_SINTETICA.nuevos) * 1570;
+  if (tipo === "arg_cedears" && s.length > 2 && s.endsWith("D") && !s.startsWith("D")) return base(`${s.slice(0, -1)}.BA`) / 1570;
+  return base(`${s}.BA`);
+}
+
 function panelBYMA(tipo) {
   const listas = {
     arg_stocks: ["GGAL", "YPFD", "PAMP", "ALUA", "BMA", "TXAR", "CEPU", "LOMA", "TGSU2", "SUPV", "BBAR", "COME", "EDN", "CRES", "IRSA", "METR", "TECO2", "TRAN", "VALO", "BYMA", "MOLI", "HARG", "AGRO"],
-    arg_cedears: ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "KO", "MELI", "SPY", "QQQ"],
-    arg_bonds: Object.keys(BONOS_USD).flatMap((t) => [t, `${t}D`]),
-    arg_notes: ["S13N6", "S30N6", "T15E7"],
-    arg_corp: ["YMCXO", "TLC1O", "PNDCO"],
+    arg_cedears: ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "KO", "MELI", "SPY", "QQQ", "AAPLD", "MSFTD", "KOD"],
+    arg_bonds: [...Object.keys(BONOS_USD).flatMap((t) => [t, `${t}D`]), "T15E7", "AO27", "AO27D", "AN29D"],
+    arg_notes: ["S13N6", "S30N6"],
+    arg_corp: ["YMCXO", "TLC1O", "PNDCO", "YMCXD", "MGCOD", "VSCTD", "TSC4D"],
     usa_adrs: ["GGAL", "YPF", "PAM", "BMA", "TEO", "CEPU"]
   };
   return json((listas[tipo] || []).map((s) => {
     const r = rng(hash(tipo + s));
-    const usd = BONOS_USD[s.replace(/D$/, "")];
-    const c = tipo === "arg_bonds" && usd ? (s.endsWith("D") ? usd : usd * 1570) : base(`${s}.BA`);
+    const c = precioSintetico(tipo, s);
     return { symbol: s, c, pct_change: (r() - 0.5) * 6, v: Math.round(r() * 5e8), q_op: Math.round(r() * 3000), px_bid: c * 0.998, px_ask: c * 1.002, q_bid: 100, q_ask: 120 };
   }));
 }
@@ -365,10 +382,20 @@ async function falso(entrada, init = {}) {
     }
     if (p.startsWith("/historical/")) return json(velas(p.split("/").pop(), 300).map((x) => ({ date: iso(x.t * 1000), o: x.o, h: x.h, l: x.l, c: x.c, v: x.v, dr: 0, sa: 0 })));
   }
-  if (h === "api.bcra.gob.ar") return json({ status: 200, results: [
-    { idVariable: 1, descripcion: "Reservas internacionales (sintético)", categoria: "Principales Variables", ultFechaInformada: iso(Date.now()), ultValorInformado: 41000, unidadExpresion: "Millones de USD" },
-    { idVariable: 7, descripcion: "Tasa BADLAR (sintético)", categoria: "Principales Variables", ultFechaInformada: iso(Date.now()), ultValorInformado: 21.5, unidadExpresion: "% TNA" }
-  ] });
+  if (h === "api.bcra.gob.ar") {
+    /* Series diarias (v4): límites de la banda cambiaria. */
+    const serie = p.match(/\/Monetarias\/(\d+)$/);
+    if (serie) {
+      const valores = { 1187: 690, 1188: 1980 };
+      const v = valores[serie[1]];
+      if (!v) return json({ status: 404, errorMessages: ["sin serie"] }, 404);
+      return json({ status: 200, results: [{ idVariable: Number(serie[1]), detalle: habiles(20).map((d, i) => ({ fecha: iso(d), valor: v * (1 + (serie[1] === "1188" ? 1 : -1) * 0.0006 * i) })) }] });
+    }
+    return json({ status: 200, results: [
+      { idVariable: 1, descripcion: "Reservas internacionales (sintético)", categoria: "Principales Variables", ultFechaInformada: iso(Date.now()), ultValorInformado: 41000, unidadExpresion: "Millones de USD" },
+      { idVariable: 7, descripcion: "Tasa BADLAR (sintético)", categoria: "Principales Variables", ultFechaInformada: iso(Date.now()), ultValorInformado: 21.5, unidadExpresion: "% TNA" }
+    ] });
+  }
 
   throw new TypeError(`fetch failed (sin fixture para ${url.href})`);
 }

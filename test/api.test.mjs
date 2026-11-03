@@ -286,8 +286,9 @@ test("armado de carteras: supuestos, APT y optimización", async () => {
   assert.equal((await get("/api/carteras/optimizar?t=PRUEBA")).status, 400);
 });
 
-test("clientes: alta, cartera valuada con alertas, edición y baja", async () => {
+test("clientes: movimientos, rendimiento, agenda, perfil, objetivo y baja", async () => {
   assert.equal((await ok("/api/clientes")).clientes.length, 0);
+  /* Formato anterior (posiciones): se convierte en compras. */
   const c = await enviar("POST", "/api/clientes", {
     nombre: "Cliente de prueba", perfil: "conservador", horizonte: "largo", efectivo: { ARS: 157000, USD: 50 },
     posiciones: [
@@ -296,7 +297,9 @@ test("clientes: alta, cartera valuada con alertas, edición y baja", async () =>
     ]
   });
   assert.match(c.id, /^c[a-f0-9]{10}$/);
-  assert.equal(c.posiciones[0].ticker, "PRUEBA");
+  assert.equal(c.movimientos.length, 2);
+  assert.equal(c.movimientos[0].tipo, "compra");
+  assert.equal(c.movimientos[0].ticker, "PRUEBA");
   assert.equal(c.criterios.volMax, 15, "criterios por defecto del perfil");
   const k = await ok(`/api/clientes/${c.id}/cartera`);
   assert.equal(k.posiciones.length, 2);
@@ -304,18 +307,76 @@ test("clientes: alta, cartera valuada con alertas, edición y baja", async () =>
   assert.equal(g.moneda, "ARS");
   assert.ok(Math.abs(g.valorUsd - g.valorArs / k.cclHoy) < 1e-6, "pesos pasados a dólares por el CCL de hoy");
   assert.ok(Math.abs(k.posiciones.reduce((s, p) => s + p.peso, 0) + k.totales.liquidez - 100) < 1e-6, "pesos más liquidez suman 100");
-  assert.ok(k.serie.length > 50 && k.riesgo.vol > 0);
+  assert.ok(k.riesgo.vol > 0 && k.contribucion.length === 2);
+  assert.ok(Math.abs(k.contribucion.reduce((s, x) => s + x.riesgo, 0) - 100) < 1e-6, "la contribución al riesgo suma 100");
+  assert.ok(k.rendimiento && Number.isFinite(k.rendimiento.twrUsd) && k.rendimiento.serie.length > 50);
+  assert.ok(k.rendimiento.benchmarks.find((b) => b.id === "spy").valor !== null);
+  assert.ok(k.escenarios.length >= 2);
   assert.ok(k.alertas.some((a) => /pesa/.test(a.texto)), "concentración contra el máximo del perfil conservador");
-  const e = await enviar("PUT", `/api/clientes/${c.id}`, { nombre: "Cliente editado", criterios: { pesoMax: 100 } });
+  assert.ok(k.alertas.some((a) => /cuestionario/.test(a.texto)), "falta el cuestionario de perfil");
+
+  /* Renta fija, venta parcial, renta cobrada, cuestionario y cartera objetivo. */
+  const movimientos = [...c.movimientos,
+    { tipo: "compra", ticker: "GD30D", cantidad: 1000, precio: 60, fecha: "2026-05-04" },
+    { tipo: "compra", ticker: "YMCXD", cantidad: 2000, precio: 95, fecha: "2026-06-01" },
+    { tipo: "venta", ticker: "PRUEBA", cantidad: 4, precio: 110, fecha: "2026-07-01" },
+    { tipo: "renta", ticker: "GD30D", monto: 82.4, moneda: "USD", concepto: "cupón", fecha: "2026-07-09" }
+  ];
+  const respuestas = { experiencia: 1, conocimiento: 1, objetivo: 1, patrimonio: 1, ingresos: 1, horizonte: 1, perdida: 1, reaccion: 1 };
+  const e = await enviar("PUT", `/api/clientes/${c.id}`, {
+    nombre: "Cliente editado", perfil: "moderado", criterios: { pesoMax: 100 }, movimientos,
+    cuestionario: { respuestas, fecha: "2026-02-01", montoAnual: 50000, origenFondos: "Ahorros" },
+    asignacion: [{ ticker: "GD30D", peso: 40 }, { ticker: "PRUEBA", peso: 20 }]
+  });
   assert.equal(e.nombre, "Cliente editado");
-  assert.equal(e.posiciones.length, 2, "editar datos no borra posiciones");
-  assert.equal(e.criterios.pesoMax, 100);
-  const sinConc = await ok(`/api/clientes/${c.id}/cartera`);
-  assert.ok(!sinConc.alertas.some((a) => /pesa/.test(a.texto)));
+  assert.equal(e.movimientos.length, 6);
+  assert.equal(e.cuestionario.sugerido, "conservador");
+  const k2 = await ok(`/api/clientes/${c.id}/cartera`);
+  const gd = k2.posiciones.find((p) => p.ticker === "GD30D");
+  assert.ok(gd.rentaFija && Math.abs(gd.valorUsd - 1000 * 62 / 100) < 1e-6, "renta fija valuada cada 100 nominales");
+  assert.equal(k2.posiciones.find((p) => p.ticker === "PRUEBA").cantidad, 6);
+  assert.ok(k2.totales.realizadoUsd !== 0 && Math.abs(k2.totales.rentasUsd - 82.4) < 1e-9);
+  assert.ok(k2.agenda.some((f) => f.ticker === "GD30D" && f.fecha.endsWith("-01-09")), "cupón de enero en la agenda");
+  assert.ok(k2.agenda.some((f) => f.ticker === "YMCXD"), "flujos de la ON en la agenda");
+  assert.ok(k2.sensibilidad.dv01Usd > 0);
+  assert.ok(k2.alertas.some((a) => /más agresivo/.test(a.texto)), "perfil asignado más agresivo que el sugerido");
+  assert.ok(k2.rebalanceo.filas.some((f) => f.ticker === "Efectivo"));
+  assert.ok(!k2.alertas.some((a) => /pesa/.test(a.texto)));
+
+  /* Validaciones. */
+  const malo = (cuerpo) => get(`/api/clientes/${c.id}`, { metodo: "PUT", cuerpo: JSON.stringify(cuerpo) });
+  assert.equal((await malo({ movimientos: [...movimientos, { tipo: "venta", ticker: "PRUEBA", cantidad: 50, precio: 1, fecha: "2026-08-01" }] })).status, 400, "no se puede vender más de lo que hay");
+  assert.equal((await malo({ asignacion: [{ ticker: "A", peso: 70 }, { ticker: "B", peso: 40 }] })).status, 400, "la cartera objetivo no puede pasar de 100%");
+  assert.equal((await malo({ cuestionario: { respuestas: { experiencia: 1 } } })).status, 400, "cuestionario incompleto");
   assert.equal((await get("/api/clientes", { metodo: "POST", cuerpo: JSON.stringify({ nombre: "" }) })).status, 400);
   assert.equal((await get("/api/clientes", { metodo: "POST", cuerpo: JSON.stringify({ nombre: "x", posiciones: [{ ticker: "no válido!", cantidad: 1, precioCompra: 1 }] }) })).status, 400);
   assert.equal((await get(`/api/clientes/${c.id}`, { metodo: "DELETE", tipo: "text/plain" })).status, 415, "borrar exige JSON");
   await enviar("DELETE", `/api/clientes/${c.id}`, {});
   assert.equal((await get(`/api/clientes/${c.id}`)).status, 404);
   assert.equal((await get("/api/clientes/../../etc")).status, 404);
+});
+
+test("renta fija propia: LECAP, ONs, bonos nuevos, breakevens y CEDEARs", async () => {
+  const { TIR_SINTETICA } = await import("./fake-fetch.mjs");
+  const f = await ok("/api/ar/tasafija");
+  const s30 = f.filas.find((x) => x.ticker === "S30N6");
+  assert.equal(s30.fuente, "propia");
+  assert.ok(Math.abs(s30.tem - TIR_SINTETICA.temLecap * 100) < 0.01, `TEM recalculada desde el pago final: ${s30.tem}`);
+  assert.ok(f.filas.every((x) => x.dias > 0));
+  const o = await ok("/api/ar/ons");
+  const ym = o.filas.find((x) => x.ticker === "YMCXD");
+  assert.ok(Math.abs(ym.tir - TIR_SINTETICA.ons * 100) < 0.05, `TIR de la ON: ${ym.tir}`);
+  assert.ok(Number.isFinite(ym.spread) && ym.md > 0);
+  const n = await ok("/api/ar/dolar-nuevos");
+  assert.ok(Math.abs(n.filas.find((x) => x.ticker === "AN29").tir - TIR_SINTETICA.nuevos * 100) < 0.05);
+  const b = await ok("/api/ar/breakevens");
+  assert.ok(b.banda.techo > b.banda.piso && b.banda.distanciaTecho !== null);
+  assert.ok(b.carry.length && b.carry.every((x) => x.dolarEquilibrio > b.mayorista && (x.dias > 550 ? x.techo === null : x.techo >= b.banda.techo)), "techo proyectado hasta 18 meses");
+  assert.ok(b.remPromedio > 1 && b.remPromedio < 3, `REM solo con medianas mensuales: ${b.remPromedio}`);
+  assert.ok(b.implicita.every((x) => Math.abs(x.tirReal) <= 20), "sin TIR reales imposibles en la curva CER");
+  const ce = await ok("/api/ar/cedears");
+  const aapl = ce.filas.find((x) => x.ticker === "AAPL");
+  assert.ok(Math.abs(aapl.mepImplicito - 1570) < 1e-6, "MEP implícito = pesos / especie D");
+  assert.ok(aapl.cclImplicito > 0 && aapl.ratio === 20);
+  assert.ok((await ok("/api/ar/metodologia")).filas.length >= 5);
 });

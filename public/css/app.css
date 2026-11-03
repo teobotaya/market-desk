@@ -120,6 +120,7 @@ main { padding: 18px 22px 40px; min-width: 0; outline: none; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .grid2, .grid3 { margin-bottom: 16px; }
 .grid2 > .card, .grid3 > .card { margin-bottom: 0; }
+.grid2 > *, .grid3 > * { min-width: 0; }
 .mini-tablas { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 22px; }
 .bloque { margin-bottom: 16px; }
 
@@ -255,7 +256,31 @@ td .sub { display: block; color: var(--faint); font-size: 12px; }
 .campo input, .campo select, .campo textarea { width: 100%; }
 .form-pos { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .form-pos input[type=number] { width: 140px; }
-.form-pos input[name=precioCompra] { width: 175px; }
+.form-pos input[name=cantidad] { width: 175px; }
+.form-pos [hidden] { display: none !important; }
+.importar { margin-top: 12px; }
+.importar summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.pregunta { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px 8px; margin: 0 0 10px; }
+.pregunta legend { padding: 0 6px; font-weight: 600; font-size: 13.5px; }
+.opcion { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; cursor: pointer; }
+.fila.obj { margin: 4px 0; }
+table.mensual td, table.mensual th { padding: 4px 6px; font-size: 12px; }
+.informe { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 26px; }
+.informe section { margin-top: 18px; break-inside: avoid; }
+.informe h3 { font-size: 14px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.informe-h { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid var(--line2); padding-bottom: 12px; }
+.informe-h h2 { margin: 0; font-size: 21px; }
+.informe-h p { margin: 4px 0 0; color: var(--muted); }
+.informe-pie { margin-top: 22px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+@media print {
+  header.top, aside.lateral, footer.pie, .vista-h, .no-imprimir, .subtabs { display: none !important; }
+  .layout { display: block; }
+  main#vista { padding: 0; }
+  body { background: #fff; color: #111; }
+  .informe { border: 0; padding: 0; background: #fff; }
+  .informe .kpi, .informe table { color: #111; }
+  .informe section, .informe tr { break-inside: avoid; }
+}
 .calc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 14px; }
 .calc-grid .campo input { font-family: var(--mono); }
 .resultado { font: 650 26px var(--mono); margin: 4px 0; }
@@ -293,4 +318,8 @@ table.estados td:first-child { white-space: nowrap; }
   .activo-precio { font-size: 20px; }
   .kpis, .kpis.cuatro { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tablero { grid-template-columns: 1fr; }
+  /* Las tablas armadas a mano se desplazan a lo ancho en vez de desbordar la página. */
+  main table { display: block; overflow-x: auto; max-width: 100%; }
+  .informe { padding: 14px; }
+  .informe-h { flex-direction: column; }
 }
