@@ -15,11 +15,14 @@ import noticias from "./views/noticias.js";
 import { tesis, call, foso } from "./views/ia.js";
 import tradingview from "./views/tradingview.js";
 import fuentes from "./views/fuentes.js";
+import clientes from "./views/clientes.js";
+import carteras from "./views/carteras.js";
 
-const VISTAS = Object.fromEntries([mercado, argentina, calendario, cotizacion, fundamentales, valuacion, riesgo, criterios, sec, noticias, tesis, call, foso, tradingview, fuentes].map((v) => [v.id, v]));
+const VISTAS = Object.fromEntries([mercado, argentina, calendario, clientes, carteras, cotizacion, fundamentales, valuacion, riesgo, criterios, sec, noticias, tesis, call, foso, tradingview, fuentes].map((v) => [v.id, v]));
 
 const GRUPOS = [
   ["Mercados", ["resumen", "argentina", "calendario"]],
+  ["Clientes y carteras", ["clientes", "carteras"]],
   ["Activo", ["cotizacion", "fundamentales", "valuacion", "riesgo", "criterios", "sec", "noticias"]],
   ["Análisis con IA", ["tesis", "call", "foso"]],
   ["Herramientas", ["tradingview", "fuentes"]]
@@ -53,6 +56,9 @@ const ctx = {
   memo,
   precio: (rango = "2y") => memo(`px:${rango}`, () => api(`/api/price?${qs({ t: estado.ticker, rango, usd: estado.usdCcl ? "ccl" : "" })}`)),
   ir: (vista, t) => { location.hash = `#/${vista}${t ? `?t=${encodeURIComponent(t)}` : ""}`; },
+  /* Parámetros de la dirección (#/clientes?c=ID) y navegación con ellos. */
+  get params() { return new URLSearchParams(location.hash.split("?")[1] || ""); },
+  irCon: (vista, params = {}) => { const q = new URLSearchParams(params).toString(); location.hash = `#/${vista}${q ? `?${q}` : ""}`; },
   cargarTicker: (t, vista) => cambiarTicker(t, vista),
   watchlist: () => pref("watchlist", WATCH_INICIAL),
   enWatchlist: (t) => pref("watchlist", WATCH_INICIAL).includes(t),

@@ -153,18 +153,30 @@ function presentaciones(cik) {
     const acc = pre ? acciones / 4 : acciones;
     add("WeightedAverageNumberOfDilutedSharesOutstanding", "shares", { start, end, val: acc, ...meta });
     add("EarningsPerShareDiluted", "USD/shares", { start, end, val: Math.round((vals.neto / acc) * 100) / 100, ...meta });
+    add("EarningsPerShareBasic", "USD/shares", { start, end, val: Math.round((vals.neto / acc) * 102) / 100, ...meta });
+    add("SellingGeneralAndAdministrativeExpense", "USD", { start, end, val: vals.ingresos * 0.18, ...meta });
+    add("InterestExpense", "USD", { start, end, val: vals.ingresos * 0.006, ...meta });
   };
   const emitirCaja = (meta, start, end, vals) => {
     add("NetCashProvidedByUsedInOperatingActivities", "USD", { start, end, val: vals.cfo, ...meta });
     add("PaymentsToAcquirePropertyPlantAndEquipment", "USD", { start, end, val: vals.capex, ...meta });
     add("DepreciationDepletionAndAmortization", "USD", { start, end, val: vals.amort, ...meta });
     add("ShareBasedCompensation", "USD", { start, end, val: vals.sbc, ...meta });
+    add("NetCashProvidedByUsedInInvestingActivities", "USD", { start, end, val: -vals.capex * 1.4, ...meta });
+    add("NetCashProvidedByUsedInFinancingActivities", "USD", { start, end, val: -vals.cfo * 0.3, ...meta });
   };
   const emitirBalance = (meta, end, b) => {
     add("StockholdersEquity", "USD", { end, val: b.patrimonio, ...meta });
     add("CashAndCashEquivalentsAtCarryingValue", "USD", { end, val: b.caja, ...meta });
     add("LongTermDebtNoncurrent", "USD", { end, val: b.deuda, ...meta });
     add("Assets", "USD", { end, val: b.activos, ...meta });
+    add("AssetsCurrent", "USD", { end, val: b.activos * 0.4, ...meta });
+    add("AccountsReceivableNetCurrent", "USD", { end, val: b.activos * 0.08, ...meta });
+    add("InventoryNet", "USD", { end, val: b.activos * 0.05, ...meta });
+    add("PropertyPlantAndEquipmentNet", "USD", { end, val: b.activos * 0.2, ...meta });
+    add("LiabilitiesCurrent", "USD", { end, val: b.activos * 0.15, ...meta });
+    add("AccountsPayableCurrent", "USD", { end, val: b.activos * 0.06, ...meta });
+    add("LiabilitiesAndStockholdersEquity", "USD", { end, val: b.activos, ...meta });
   };
 
   for (const { y, k } of trimestres) {
@@ -263,18 +275,22 @@ function rss() {
   return texto(`<?xml version="1.0"?><rss><channel>${items.join("")}</channel></rss>`, 200, "application/rss+xml");
 }
 
+/* Precios sintéticos en dólares por cada 100 nominales, cerca de su valor técnico. */
+const BONOS_USD = { AL29: 58, GD29: 59, AL30: 61, GD30: 62, AL35: 74, GD35: 76, AE38: 78, GD38: 80, AL41: 67, GD41: 69, GD46: 73 };
+
 function panelBYMA(tipo) {
   const listas = {
     arg_stocks: ["GGAL", "YPFD", "PAMP", "ALUA", "BMA", "TXAR", "CEPU", "LOMA", "TGSU2", "SUPV", "BBAR", "COME", "EDN", "CRES", "IRSA", "METR", "TECO2", "TRAN", "VALO", "BYMA", "MOLI", "HARG", "AGRO"],
     arg_cedears: ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "KO", "MELI", "SPY", "QQQ"],
-    arg_bonds: ["AL30", "AL30D", "GD30", "GD30D", "AL35", "GD35", "AE38", "GD41"],
+    arg_bonds: Object.keys(BONOS_USD).flatMap((t) => [t, `${t}D`]),
     arg_notes: ["S13N6", "S30N6", "T15E7"],
     arg_corp: ["YMCXO", "TLC1O", "PNDCO"],
     usa_adrs: ["GGAL", "YPF", "PAM", "BMA", "TEO", "CEPU"]
   };
   return json((listas[tipo] || []).map((s) => {
     const r = rng(hash(tipo + s));
-    const c = base(`${s}.BA`);
+    const usd = BONOS_USD[s.replace(/D$/, "")];
+    const c = tipo === "arg_bonds" && usd ? (s.endsWith("D") ? usd : usd * 1570) : base(`${s}.BA`);
     return { symbol: s, c, pct_change: (r() - 0.5) * 6, v: Math.round(r() * 5e8), q_op: Math.round(r() * 3000), px_bid: c * 0.998, px_ask: c * 1.002, q_bid: 100, q_ask: 120 };
   }));
 }
@@ -342,6 +358,11 @@ async function falso(entrada, init = {}) {
     if (p.startsWith("/live/")) return panelBYMA(p.split("/").pop());
     if (p.startsWith("/eod/volatilities/")) return json([{ iv_s_term: 0.42, iv_m_term: 0.39, iv_l_term: 0.37, iv_s_term_percentile: 0.71, iv_m_term_percentile: 0.64, iv_l_term_percentile: 0.55, hv_s_term: 0.35, hv_m_term: 0.36, hv_l_term: 0.38, hv_s_term_percentile: 0.5, hv_m_term_percentile: 0.52, hv_l_term_percentile: 0.6, iv_hv_s_ratio: 1.2, iv_hv_m_ratio: 1.08, iv_hv_l_ratio: 0.97, fair_iv: 0.38, iv_fair_iv_ratio: 1.03 }]);
     if (p.includes("NOEXISTE")) return json([]);
+    const especieD = p.match(/\/historical\/bonds\/([A-Z]{2}\d{2})D$/);
+    if (especieD && BONOS_USD[especieD[1]]) {
+      const r = rng(hash(especieD[1]));
+      return json(habiles(300).map((d, i) => ({ date: iso(d), c: BONOS_USD[especieD[1]] * (0.85 + 0.15 * (i / 300)) * (1 + (r() - 0.5) * 0.01) })));
+    }
     if (p.startsWith("/historical/")) return json(velas(p.split("/").pop(), 300).map((x) => ({ date: iso(x.t * 1000), o: x.o, h: x.h, l: x.l, c: x.c, v: x.v, dr: 0, sa: 0 })));
   }
   if (h === "api.bcra.gob.ar") return json({ status: 200, results: [

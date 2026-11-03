@@ -5,14 +5,17 @@ import { ROOT, PORT, HOST, archivosLeidos } from "./lib/config.mjs";
 import { estadoFuentes, enParalelo, HttpError } from "./lib/http.mjs";
 import { perfilRiesgo, lecturaTecnica } from "./lib/indicadores.mjs";
 import { price, cotizacionLigera, buscarYahoo, consensoYahoo, paresSugeridos } from "./lib/precios.mjs";
-import { riskFactors, fundamentales, perCompleto, filings, insiders, buscarSec } from "./lib/sec.mjs";
+import { riskFactors, fundamentales, perCompleto, filings, insiders, buscarSec, estadosFinancieros } from "./lib/sec.mjs";
+import * as bonos from "./lib/bonos.mjs";
+import * as carteras from "./lib/carteras.mjs";
+import * as clientes from "./lib/clientes.mjs";
 import { news } from "./lib/noticias.mjs";
 import * as ar from "./lib/argentina.mjs";
 import * as mkt from "./lib/mercado.mjs";
 import { analizar, estadoIA } from "./lib/ia.mjs";
 import { volatilidadImplicita, finnhubActivo, finnhubResumen } from "./lib/extras.mjs";
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 const p = (u, k, def = "") => (u.searchParams.get(k) || def).trim();
 
 async function precioConMoneda(u) {
@@ -114,8 +117,52 @@ const routes = {
   "/api/ar/rentafija": () => ar.rentaFija(),
   "/api/ar/panel": (u) => ar.panel(p(u, "tipo", "acciones")),
   "/api/ar/implicito": () => ar.dolarImplicito(),
-  "/api/ar/bcra": () => ar.variablesBcra()
+  "/api/ar/bcra": () => ar.variablesBcra(),
+  "/api/ar/bonos": () => bonos.bonosDolar(),
+  "/api/ar/bono": (u) => bonos.bonoDetalle(p(u, "t")),
+
+  /* ---------------------------------------------------- estados y carteras */
+  "/api/estados": (u) => estadosFinancieros(p(u, "t")),
+  "/api/carteras/supuestos": (u) => carteras.supuestos(p(u, "t")),
+  "/api/carteras/apt": (u) => carteras.apt(p(u, "t"), p(u, "f").split(",").map((x) => x.trim().toUpperCase()).filter(Boolean)),
+  "/api/carteras/optimizar": (u) => carteras.optimizar(p(u, "t").split(","), p(u, "pesos").split(","), p(u, "rf") === "" ? null : Number(p(u, "rf"))),
+
+  /* -------------------------------------------------------------- clientes */
+  "/api/clientes": () => clientes.listar()
 };
+
+/* Rutas que escriben (POST, PUT, DELETE) o que llevan un identificador en la
+   ruta. Los ids de cliente tienen un formato fijo: nada arbitrario llega al
+   módulo de datos. */
+const ID = "(c[a-f0-9]{10})";
+const ESCRITURAS = [
+  ["POST", /^\/api\/analizar$/, (m, b) => {
+    if (!b.prompt || String(b.prompt).length < 20) throw new HttpError("prompt vacío", 400);
+    return analizar(String(b.prompt), b.proveedor);
+  }],
+  ["POST", /^\/api\/clientes$/, (m, b) => clientes.crear(b)],
+  ["PUT", new RegExp(`^/api/clientes/${ID}$`), (m, b) => clientes.actualizar(m[1], b)],
+  ["DELETE", new RegExp(`^/api/clientes/${ID}$`), (m) => clientes.eliminar(m[1])]
+];
+const LECTURAS = [
+  [new RegExp(`^/api/clientes/${ID}$`), (m) => clientes.obtener(m[1])],
+  [new RegExp(`^/api/clientes/${ID}/cartera$`), (m) => clientes.cartera(m[1])]
+];
+
+function leerJson(req) {
+  return new Promise((resolve, reject) => {
+    let cuerpo = "";
+    req.on("data", (c) => {
+      cuerpo += c;
+      if (cuerpo.length > 1_000_000) { reject(new HttpError("cuerpo demasiado grande", 413)); req.destroy(); }
+    });
+    req.on("end", () => {
+      try { resolve(cuerpo ? JSON.parse(cuerpo) : {}); }
+      catch { reject(new HttpError("JSON inválido", 400)); }
+    });
+    req.on("error", reject);
+  });
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
@@ -157,26 +204,26 @@ export const server = http.createServer(async (req, res) => {
 
   if (!hostPermitido(req)) return send(403, JSON.stringify({ error: "host no permitido" }));
 
-  if (req.method === "POST" && url.pathname === "/api/analizar") {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const ruta = ESCRITURAS.find(([metodo, re]) => metodo === req.method && re.test(url.pathname));
+    if (!ruta) return send(405, JSON.stringify({ error: "método no permitido" }));
     /* Exigir JSON obliga al navegador a hacer una consulta previa (CORS), que
-       este servidor no responde: otra página no puede gastar tu cuota. */
+       este servidor no responde: otra página no puede gastar tu cuota de IA
+       ni tocar tus clientes. */
     if (!/application\/json/i.test(req.headers["content-type"] || "")) return send(415, JSON.stringify({ error: "se espera JSON" }));
-    let cuerpo = "";
-    req.on("data", (c) => { cuerpo += c; if (cuerpo.length > 600_000) req.destroy(); });
-    req.on("end", async () => {
-      try {
-        const { prompt, proveedor } = JSON.parse(cuerpo || "{}");
-        if (!prompt || prompt.length < 20) return send(400, JSON.stringify({ error: "prompt vacío" }));
-        send(200, JSON.stringify(await analizar(prompt, proveedor)));
-      } catch (e) { error(e); }
-    });
+    try { send(200, JSON.stringify(await ruta[2](url.pathname.match(ruta[1]), await leerJson(req)))); }
+    catch (e) { error(e); }
     return;
   }
 
-  if (req.method !== "GET" && req.method !== "HEAD") return send(405, JSON.stringify({ error: "método no permitido" }));
-
   if (routes[url.pathname]) {
     try { send(200, JSON.stringify(await routes[url.pathname](url))); }
+    catch (e) { error(e); }
+    return;
+  }
+  const conParametro = LECTURAS.find(([re]) => re.test(url.pathname));
+  if (conParametro) {
+    try { send(200, JSON.stringify(await conParametro[1](url.pathname.match(conParametro[0]), url))); }
     catch (e) { error(e); }
     return;
   }

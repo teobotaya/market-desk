@@ -7,6 +7,11 @@ import assert from "node:assert/strict";
 import "./fake-fetch.mjs";
 
 process.env.HOST = "127.0.0.1";
+/* Los clientes de los tests van a una carpeta temporal, nunca a datos/. */
+import os from "node:os";
+import fsSync from "node:fs";
+import pathMod from "node:path";
+process.env.MD_DATOS = fsSync.mkdtempSync(pathMod.join(os.tmpdir(), "md-test-"));
 const { server } = await import("../server.mjs");
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -16,7 +21,8 @@ test.after(() => server.close());
 import http from "node:http";
 function get(ruta, { metodo = "GET", cuerpo, tipo = "application/json", host } = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request(`${base}${ruta}`, { method: metodo, headers: { "content-type": tipo, ...(host ? { host } : {}) } }, (res) => {
+    const largo = cuerpo ? { "content-length": Buffer.byteLength(cuerpo) } : {};
+    const req = http.request(`${base}${ruta}`, { method: metodo, headers: { "content-type": tipo, ...largo, ...(host ? { host } : {}) } }, (res) => {
       let d = "";
       res.on("data", (c) => { d += c; });
       res.on("end", () => {
@@ -219,4 +225,97 @@ test("seguridad: host ajeno, JSON obligatorio, rutas y archivos", async () => {
   assert.equal(html.status, 200);
   assert.match(html.headers["content-security-policy"], /default-src 'self'/);
   assert.equal((await get("/js/main.js")).status, 200);
+});
+
+/* ---------------------------------------------------------------- 2.1 */
+
+const enviar = async (metodo, ruta, cuerpo) => {
+  const r = await get(ruta, { metodo, cuerpo: cuerpo === undefined ? undefined : JSON.stringify(cuerpo) });
+  assert.equal(r.status, 200, `${metodo} ${ruta} respondió ${r.status}: ${r.texto.slice(0, 300)}`);
+  return r.json;
+};
+
+test("bonos soberanos en dólares: TIR, paridad, spreads y detalle", async () => {
+  const b = await ok("/api/ar/bonos");
+  assert.equal(b.filas.length, 11);
+  const gd30 = b.filas.find((f) => f.ticker === "GD30");
+  assert.equal(gd30.especie, "MEP");
+  assert.ok(gd30.tir > 0 && gd30.md > 0 && gd30.paridad > 50 && gd30.vr === 64);
+  assert.ok(b.spreads.length >= 4);
+  const d = await ok("/api/ar/bono?t=GD35");
+  assert.ok(d.cronograma.length > 20 && d.cronograma.some((f) => f.pagado) && d.cronograma.some((f) => !f.pagado));
+  assert.ok(d.historia.length > 50, "TIR histórica recalculada");
+  assert.equal((await get("/api/ar/bono?t=XX99")).status, 404);
+});
+
+test("estados financieros completos", async () => {
+  const e = await ok("/api/estados?t=PRUEBA");
+  assert.ok(e.anual.columnas.length >= 5 && e.trimestral.columnas.length === 8);
+  const linea = (estado, k, modo = "anual") => e[modo].estados[estado].find((l) => l.k === k);
+  const ult = (estado, k, modo) => linea(estado, k, modo).valores.at(-1);
+  assert.ok(ult("resultados", "costoVentas") < 0, "el costo se muestra como salida");
+  assert.ok(Math.abs(ult("resultados", "bruto") - ult("resultados", "ingresos") * 0.6) < 1, "bruto calculado");
+  assert.ok(linea("resultados", "ebitda").calculada);
+  assert.ok(Math.abs(ult("balance", "pasivo") - (ult("balance", "activo") - ult("balance", "patrimonio"))) < 1, "pasivo derivado de pasivo + patrimonio");
+  assert.ok(ult("balance", "liquidez") > 2);
+  assert.ok(ult("flujo", "fcf") > 0 && ult("flujo", "capex") < 0);
+  assert.ok(linea("flujo", "cfo", "trimestral").valores.every((v) => v > 0), "flujo trimestral reconstruido");
+});
+
+test("calendario: todas las empresas con marca de destacadas", async () => {
+  const c = await ok("/api/mercado/calendario?dias=5");
+  const filas = c.dias.flatMap((d) => d.filas);
+  assert.ok(filas.some((f) => f.ticker === "CHICA" && !f.destacada), "las chicas vienen para el buscador");
+  assert.ok(filas.some((f) => f.ticker === "GRANDE" && f.destacada));
+});
+
+test("armado de carteras: supuestos, APT y optimización", async () => {
+  const s = await ok("/api/carteras/supuestos?t=PRUEBA");
+  assert.ok(s.rf.valor > 0 && s.beta !== null && s.E > 0 && s.fcf > 0 && s.acciones > 0);
+  assert.ok(s.kd > 0 && s.tasaImpositiva > 0);
+  const a = await ok("/api/carteras/apt?t=PRUEBA&f=SPY,GLD");
+  assert.equal(a.factores.length, 2);
+  assert.ok(a.semanas > 40 && a.r2 >= 0 && a.r2 <= 1);
+  const o = await ok("/api/carteras/optimizar?t=PRUEBA,SPY,GGAL.BA&pesos=50,30,20&rf=4");
+  assert.equal(o.activos.length, 3);
+  assert.equal(o.activos[2].moneda, "USD CCL", "lo que cotiza en pesos se pasa a dólares");
+  assert.ok(Math.abs(o.usuario.pesos.reduce((x, y) => x + y, 0) - 1) < 1e-9);
+  assert.ok(o.minVar.vol <= o.usuario.vol + 1e-9);
+  assert.ok(o.maxSharpe.sharpe >= o.usuario.sharpe - 1e-9);
+  assert.equal(o.correlacion.length, 3);
+  assert.equal((await get("/api/carteras/optimizar?t=PRUEBA")).status, 400);
+});
+
+test("clientes: alta, cartera valuada con alertas, edición y baja", async () => {
+  assert.equal((await ok("/api/clientes")).clientes.length, 0);
+  const c = await enviar("POST", "/api/clientes", {
+    nombre: "Cliente de prueba", perfil: "conservador", horizonte: "largo", efectivo: { ARS: 157000, USD: 50 },
+    posiciones: [
+      { ticker: "prueba", cantidad: 10, precioCompra: 100, fechaCompra: "2026-01-15" },
+      { ticker: "GGAL.BA", cantidad: 5, precioCompra: 4000, fechaCompra: "2026-03-02" }
+    ]
+  });
+  assert.match(c.id, /^c[a-f0-9]{10}$/);
+  assert.equal(c.posiciones[0].ticker, "PRUEBA");
+  assert.equal(c.criterios.volMax, 15, "criterios por defecto del perfil");
+  const k = await ok(`/api/clientes/${c.id}/cartera`);
+  assert.equal(k.posiciones.length, 2);
+  const g = k.posiciones.find((p) => p.ticker === "GGAL.BA");
+  assert.equal(g.moneda, "ARS");
+  assert.ok(Math.abs(g.valorUsd - g.valorArs / k.cclHoy) < 1e-6, "pesos pasados a dólares por el CCL de hoy");
+  assert.ok(Math.abs(k.posiciones.reduce((s, p) => s + p.peso, 0) + k.totales.liquidez - 100) < 1e-6, "pesos más liquidez suman 100");
+  assert.ok(k.serie.length > 50 && k.riesgo.vol > 0);
+  assert.ok(k.alertas.some((a) => /pesa/.test(a.texto)), "concentración contra el máximo del perfil conservador");
+  const e = await enviar("PUT", `/api/clientes/${c.id}`, { nombre: "Cliente editado", criterios: { pesoMax: 100 } });
+  assert.equal(e.nombre, "Cliente editado");
+  assert.equal(e.posiciones.length, 2, "editar datos no borra posiciones");
+  assert.equal(e.criterios.pesoMax, 100);
+  const sinConc = await ok(`/api/clientes/${c.id}/cartera`);
+  assert.ok(!sinConc.alertas.some((a) => /pesa/.test(a.texto)));
+  assert.equal((await get("/api/clientes", { metodo: "POST", cuerpo: JSON.stringify({ nombre: "" }) })).status, 400);
+  assert.equal((await get("/api/clientes", { metodo: "POST", cuerpo: JSON.stringify({ nombre: "x", posiciones: [{ ticker: "no válido!", cantidad: 1, precioCompra: 1 }] }) })).status, 400);
+  assert.equal((await get(`/api/clientes/${c.id}`, { metodo: "DELETE", tipo: "text/plain" })).status, 415, "borrar exige JSON");
+  await enviar("DELETE", `/api/clientes/${c.id}`, {});
+  assert.equal((await get(`/api/clientes/${c.id}`)).status, 404);
+  assert.equal((await get("/api/clientes/../../etc")).status, 404);
 });

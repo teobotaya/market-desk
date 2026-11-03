@@ -413,3 +413,48 @@ export function barraRango(min, max, actual, marcasExtra = [], { fmt = (v) => nu
     <div class="rango-eje"><span>mín ${esc(fmt(min))}</span>${marcasExtra.filter((m) => m.eje).map((m) => `<span>${esc(m.t)} ${esc(fmt(m.v))}</span>`).join("")}<span>máx ${esc(fmt(max))}</span></div>
   </div>`;
 }
+
+/* ---------------------------------------------------------- dispersión */
+
+/* Nube de puntos (x, y) con algunos destacados y rotulados encima. */
+export function graficoDispersion(el, puntos, destacados = [], o = {}) {
+  observar(el, () => {
+    const todos = [...puntos, ...destacados];
+    if (!todos.length) { el.innerHTML = `<div class="vacio">Sin datos.</div>`; return; }
+    const W = Math.max(280, el.clientWidth), H = o.alto || 280, m = { l: 46, r: 16, t: 12, b: 30 };
+    const { svg, tip } = contenedor(el, H);
+    const xs = todos.map((p) => p.x), ys = todos.map((p) => p.y);
+    let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const px = (x1 - x0) * 0.08 || 1, py = (y1 - y0) * 0.1 || 1;
+    x0 -= px; x1 += px; y0 -= py; y1 += py;
+    const sx = (x) => m.l + ((x - x0) / (x1 - x0)) * (W - m.l - m.r);
+    const sy = (y) => m.t + (1 - (y - y0) / (y1 - y0)) * (H - m.t - m.b);
+    const fx = o.fmtX || ((v) => num(v, 0)), fy = o.fmtY || ((v) => num(v, 0));
+    const partes = [];
+    for (const t of marcas(y0, y1, 4)) partes.push(`<line x1="${m.l}" x2="${W - m.r}" y1="${sy(t)}" y2="${sy(t)}" class="grid"/><text x="${m.l - 6}" y="${sy(t) + 3.5}" class="eje" text-anchor="end">${esc(fy(t))}</text>`);
+    for (const t of marcas(x0, x1, 5)) partes.push(`<text x="${sx(t)}" y="${H - 12}" class="eje" text-anchor="middle">${esc(fx(t))}</text>`);
+    if (o.etiquetaX) partes.push(`<text x="${W - m.r}" y="${H - 1}" class="eje" text-anchor="end">${esc(o.etiquetaX)}</text>`);
+    if (o.etiquetaY) partes.push(`<text x="${m.l}" y="${m.t - 2}" class="eje">${esc(o.etiquetaY)}</text>`);
+    for (const p of puntos) partes.push(`<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="2" style="fill:var(--faint);opacity:.45"/>`);
+    /* Si dos rótulos caerían en el mismo lugar, el siguiente baja una línea. */
+    const rotulos = [];
+    destacados.forEach((p, i) => {
+      let ty = sy(p.y) + 4;
+      const tx = sx(p.x) + 9;
+      while (rotulos.some(([x, y]) => Math.abs(x - tx) < 70 && Math.abs(y - ty) < 13)) ty += 13;
+      rotulos.push([tx, ty]);
+      partes.push(`<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${p.r || 6}" style="fill:${p.color || "var(--accent)"};stroke:var(--panel);stroke-width:2" data-i="${i}"/><text x="${tx}" y="${ty}" class="eje-l">${esc(p.etiqueta || "")}</text>`);
+    });
+    svg.innerHTML = partes.join("");
+    svg.addEventListener("mousemove", (e) => {
+      const c = e.target.closest("circle[data-i]");
+      if (!c) { tip.hidden = true; return; }
+      const p = destacados[Number(c.dataset.i)];
+      tip.innerHTML = `<b>${esc(p.etiqueta || "")}</b><br>${esc(o.nombreX || "x")}: ${esc(fx(p.x))}<br>${esc(o.nombreY || "y")}: ${esc(fy(p.y))}`;
+      tip.hidden = false;
+      const b = svg.getBoundingClientRect();
+      ubicarTip(el, tip, e.clientX - b.left, e.clientY - b.top);
+    });
+    svg.addEventListener("mouseleave", () => { tip.hidden = true; });
+  });
+}

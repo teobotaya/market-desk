@@ -5,3 +5,6 @@ EJEMPLO.env.txt
 *.env.txt
 *.env
 _privado/
+
+# Datos de clientes: privados, nunca al repositorio
+datos/

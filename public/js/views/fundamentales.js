@@ -1,4 +1,4 @@
-import { esc, enlace, num, pct, pctS, precio, grande, veces, cls, kpi, cargando, errorHtml, api, tarjeta, fecha, descargarCsv, vacio } from "../util.js";
+import { esc, enlace, num, pct, pctS, precio, grande, veces, cls, kpi, cargando, errorHtml, api, tarjeta, fecha, descargarCsv, vacio, subtabs, enlazarSubtabs, pref, setPref } from "../util.js";
 import { barraRango, graficoBarras } from "../charts.js";
 import { dossier } from "../dossier.js";
 import { bloqueFundamentales, bloqueConsenso, REGLAS } from "./comun.js";
@@ -39,7 +39,7 @@ export default {
   descripcion: "Estados financieros presentados a la SEC (últimos 12 meses, anuales y trimestrales), valuación con precio de hoy y consenso de analistas. Para ADRs argentinos usa el 20-F (YPFD.BA → YPF).",
 
   async render(el, ctx) {
-    el.innerHTML = `<div data-perfil></div><div data-val>${cargando("Bajando los estados financieros de la SEC (la primera vez tarda: el archivo es grande)…")}</div><div data-cons></div><div data-tablas></div><div data-ia></div>`;
+    el.innerHTML = `<div data-perfil></div><div data-val>${cargando("Bajando los estados financieros de la SEC (la primera vez tarda: el archivo es grande)…")}</div><div data-cons></div><div data-tablas></div><div data-estados></div><div data-ia></div>`;
     const consP = ctx.memo("consenso", () => api(`/api/consenso?t=${encodeURIComponent(ctx.ticker)}`));
     const fundP = ctx.memo("fund", () => api(`/api/fundamentales?t=${encodeURIComponent(ctx.ticker)}`));
 
@@ -50,6 +50,7 @@ export default {
     const pf = fundP.then((f) => { fund = f; pintarFundamentales(el, f); }).catch((e) => {
       el.querySelector("[data-val]").innerHTML = errorHtml(e);
     });
+    estadosFinancieros(el.querySelector("[data-estados]"), ctx);
     await Promise.allSettled([pc, pf]);
     if (!fund && !cons) return;
 
@@ -202,4 +203,49 @@ function pintarConsenso(el, c) {
       </div>`)}
       ${c.cambios?.length ? tarjeta("Cambios recientes de calificación", `<div class="tabla-scroll"><table><tbody>${c.cambios.map((x) => `<tr><td class="n" style="text-align:left">${fecha(x.fecha)}</td><td>${esc(x.firma)}</td><td>${esc(x.desde || "—")} → <b>${esc(x.hacia)}</b></td><td class="faint">${esc({ up: "sube", down: "baja", main: "mantiene", init: "inicia", reit: "reitera" }[x.accion] || x.accion || "")}</td></tr>`).join("")}</tbody></table></div>`) : "<div></div>"}
     </div>` : ""}`;
+}
+
+/* ------------------------------------------------- estados financieros */
+
+const ESTADOS_TXT = { resultados: "Estado de resultados", balance: "Balance general", flujo: "Flujo de efectivo" };
+
+async function estadosFinancieros(cont, ctx) {
+  cont.innerHTML = tarjeta("Estados financieros", cargando("Armando estado de resultados, balance y flujo de efectivo…"));
+  let d;
+  try { d = await ctx.memo("estados", () => api(`/api/estados?t=${encodeURIComponent(ctx.ticker)}`)); }
+  catch (e) { cont.innerHTML = tarjeta("Estados financieros", `<div class="msg">No disponibles: ${esc(e.message)}</div>`); return; }
+  let estado = pref("estados.tab", "resultados"), modo = pref("estados.modo", "anual"), vertical = pref("estados.vertical", false);
+  const pintar = () => {
+    const bloque = d[modo];
+    if (!bloque.columnas.length) { modo = "anual"; }
+    const cols = d[modo].columnas, lineas = d[modo].estados[estado] || [];
+    /* Análisis vertical: cada línea como % de los ingresos (resultados y
+       flujo) o del activo total (balance). */
+    const baseK = estado === "balance" ? "activo" : "ingresos";
+    const base = (d[modo].estados[estado === "flujo" ? "resultados" : estado] || []).find((l) => l.k === baseK)?.valores || [];
+    const fmt = (l, v, i) => {
+      if (v === null || v === undefined) return "—";
+      if (vertical && !l.sinVertical) return base[i] ? pct((v / Math.abs(base[i])) * 100, 1) : "—";
+      if (l.ratio) return num(v, 2);
+      if (l.tipo === "bpa") return num(v, 2);
+      return grande(v);
+    };
+    const titulo = (c) => (modo === "anual" ? c.slice(0, 4) : fecha(c).slice(3));
+    cont.innerHTML = tarjeta(`Estados financieros · ${esc(d.empresa)}`, `
+      ${subtabs("estados", Object.entries(ESTADOS_TXT), estado)}
+      ${lineas.length ? `<div class="tabla-scroll"><table class="estados"><thead><tr><th>${esc(d.moneda)}</th>${cols.map((c) => `<th class="n" title="${esc(c)}">${esc(titulo(c))}</th>`).join("")}</tr></thead><tbody>
+        ${lineas.map((l) => `<tr class="${l.total ? "total" : ""} ${l.separador ? "separador" : ""} ${l.ratio ? "ratio" : ""}"><td>${esc(l.t)}${l.calculada ? ` <span class="faint" title="Calculada a partir de otras líneas">·</span>` : ""}</td>${l.valores.map((v, i) => `<td class="n ${v < 0 ? "down" : ""}">${fmt(l, v, i)}</td>`).join("")}</tr>`).join("")}
+      </tbody></table></div>` : `<p class="vacio">Sin datos de este estado para ${esc(d.ticker)}${modo === "trimestral" ? " en formato trimestral" : ""}.</p>`}
+      <p class="nota">Fuente: ${esc(d.fuente)}${d.viaAdr ? ` (emisor ${esc(d.viaAdr)})` : ""}. Las salidas de fondos y los costos van en negativo. Las líneas marcadas con · son calculadas (por ejemplo, el resultado bruto o el pasivo total cuando la empresa no los informa). En trimestral, el flujo de efectivo y el cuarto trimestre se reconstruyen restando acumulados.</p>`, {
+      acciones: `<div class="segmentos" data-modo><button data-v="anual" aria-pressed="${modo === "anual"}">Anual</button><button data-v="trimestral" aria-pressed="${modo === "trimestral"}">Trimestral</button></div>
+        <label class="chk"><input type="checkbox" data-vertical ${vertical ? "checked" : ""}>Análisis vertical</label><button class="btn chico" data-csv>CSV</button>`
+    });
+    enlazarSubtabs(cont, "estados", (k) => { estado = k; setPref("estados.tab", k); pintar(); });
+    cont.querySelector("[data-modo]").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { modo = b.dataset.v; setPref("estados.modo", modo); pintar(); } });
+    cont.querySelector("[data-vertical]").addEventListener("change", (e) => { vertical = e.target.checked; setPref("estados.vertical", vertical); pintar(); });
+    cont.querySelector("[data-csv]").addEventListener("click", () => {
+      descargarCsv(`${d.ticker}-${estado}-${modo}`, [`Línea (${d.moneda})`, ...cols], lineas.map((l) => [l.t, ...l.valores]));
+    });
+  };
+  pintar();
 }

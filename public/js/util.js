@@ -220,7 +220,7 @@ export function tablaOrdenable(cont, { columnas, filas, nombreCsv, alClick, limi
   });
   if (alClick) cont.querySelector("tbody").addEventListener("click", (e) => {
     const tr = e.target.closest("tr[data-i]");
-    if (tr && !e.target.closest("a")) alClick(filas[Number(tr.dataset.i)]);
+    if (tr && !e.target.closest("a, button, input, select")) alClick(filas[Number(tr.dataset.i)]);
   });
   dibujar();
   return { redibujar: dibujar };

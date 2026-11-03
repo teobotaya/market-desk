@@ -242,6 +242,30 @@ td .sub { display: block; color: var(--faint); font-size: 12px; }
 .md li { margin: 3px 0; }
 .md table { margin: 8px 0 12px; }
 
+/* ------------------------------------------------------- clientes y forms */
+.btn.peligro { color: var(--down); border-color: color-mix(in srgb, var(--down) 50%, var(--line2)); }
+.btn.peligro:hover { background: color-mix(in srgb, var(--down) 12%, transparent); }
+.clientes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.cliente-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel2); color: var(--ink); }
+.cliente-card:hover { border-color: var(--accent); text-decoration: none; }
+.cliente-nombre { font-weight: 650; font-size: 15px; }
+.cliente-datos { font: 12.5px var(--mono); color: var(--muted); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; margin-bottom: 10px; }
+.campo { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.campo input, .campo select, .campo textarea { width: 100%; }
+.form-pos { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.form-pos input[type=number] { width: 140px; }
+.form-pos input[name=precioCompra] { width: 175px; }
+.calc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 14px; }
+.calc-grid .campo input { font-family: var(--mono); }
+.resultado { font: 650 26px var(--mono); margin: 4px 0; }
+.formula { font: 12.5px var(--mono); color: var(--muted); background: var(--panel2); border-radius: 7px; padding: 8px 10px; margin: 8px 0; overflow-x: auto; white-space: nowrap; }
+td.heat { text-align: center; font: 12px var(--mono); }
+table.estados tr.total td { font-weight: 650; }
+table.estados tr.separador td { border-bottom: 2px solid var(--line2); }
+table.estados tr.ratio td { color: var(--muted); font-style: italic; }
+table.estados td:first-child { white-space: nowrap; }
+
 /* --------------------------------------------------------- TradingView */
 .tv { height: 560px; border: 1px solid var(--line); border-radius: var(--radio); overflow: hidden; background: var(--panel); }
 .tv.bajo { height: 460px; }

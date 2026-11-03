@@ -28,10 +28,12 @@ clave gratuita (Gemini, Groq u OpenRouter). Ver [Análisis con IA](#análisis-co
 | Sección | Qué muestra |
 |---|---|
 | **Resumen de mercado** | Índices, tasas del Tesoro, monedas, materias primas (incluye soja, maíz y trigo) y cripto con variación del día, mes y año; rotación sectorial con los ETFs SPDR; Fear & Greed de CNN; curva de tasas de EE.UU. y spreads de crédito (FRED). Brief de mercado para IA. |
-| **Argentina** | *Dólar y macro*: oficial, MEP, CCL, blue, mayorista, cripto y tarjeta con brecha, canje y variaciones; historia del dólar; riesgo país; inflación mensual, interanual y acumulada; expectativas del REM del BCRA; variables del BCRA. *Tasas y renta fija*: plazo fijo por banco, cauciones, FCI money market, letras (TNA/TEA/TEM) y bonos CER (TIR real) con sus curvas, dólar MEP y CCL implícito por bono. *Panel BYMA*: Merval líder, panel general, CEDEARs, bonos, ONs, letras y ADRs. |
-| **Calendario** | Balances de los próximos días (empresas grandes y las de tu watchlist) y calendario económico mundial. |
+| **Argentina** | *Dólar y macro*: oficial, MEP, CCL, blue, mayorista, cripto y tarjeta con brecha, canje y variaciones; historia del dólar; riesgo país; inflación mensual, interanual y acumulada; expectativas del REM del BCRA; variables del BCRA. *Bonos en dólares* (al estilo de las plataformas pagas de renta fija): AL29 a GD46 con TIR, duration, duration modificada, convexidad, PVBP, valor residual, interés corrido, valor técnico, paridad y próximo pago; curva por legislación; diferencia ley local contra Nueva York; ficha con cronograma completo y TIR histórica; calculadora precio ↔ TIR; arbitraje entre dos bonos. *Tasas y renta fija en pesos*: plazo fijo por banco, cauciones, FCI money market, letras (TNA/TEA/TEM) y bonos CER (TIR real) con sus curvas, dólar MEP y CCL implícito por bono. *Panel BYMA*: Merval líder, panel general, CEDEARs, bonos, ONs, letras y ADRs. |
+| **Calendario** | Balances de los próximos días hábiles con **buscador de empresa** (por defecto se ven las grandes y las de tu watchlist; el buscador recorre todas) y calendario económico mundial. |
+| **Clientes** | Ficha de cada cliente con perfil de riesgo, horizonte y criterios propios. Cartera valuada en pesos y en dólares CCL (el costo en dólares usa el CCL del día de compra), pesos, composición por tipo y moneda, riesgo de la cartera actual (volatilidad, caída máxima, VaR, CVaR, Sharpe) y **alertas** cuando una posición o la cartera se sale de los criterios: concentración, pérdida máxima, volatilidad y liquidez mínima. |
+| **Armado de carteras** | Calculadoras de **CAPM** (con riesgo país opcional), **WACC**, **DCF** con tabla de sensibilidad, **VAN y TIR** (también con fechas, como XVAN y XTIR), **APT** multifactor con betas estimadas por regresión, y **optimización de cartera** (mínima volatilidad, máximo Sharpe, frontera y correlaciones). Los supuestos se precargan desde los datos reales del activo. |
 | **Cotización y técnico** | Gráfico con línea o velas, SMA 20/50/200, Bollinger, RSI, volumen, rangos de 1 mes a 10 años y comparación contra otro activo. RSI, MACD, %B, cruces de medias, volatilidad, ATR, rango de 52 semanas, volumen relativo y dividendo. Lectura de los indicadores en lenguaje llano. |
-| **Fundamentales** | Estados de la SEC: últimos 12 meses, 6 ejercicios y 8 trimestres. Márgenes, ROIC, FCF, conversión, deuda, remuneración en acciones, recompras. Valuación con el precio de hoy (PER, P/V, EV/EBITDA, EV/EBIT, P/libro, rentabilidad del FCF). Consenso de analistas: precio objetivo, recomendaciones, estimaciones, revisiones, sorpresas y cambios de calificación. |
+| **Fundamentales** | **Estado de resultados, balance general y flujo de efectivo** completos (anual y trimestral, con análisis vertical y CSV). Estados de la SEC: últimos 12 meses, 6 ejercicios y 8 trimestres. Márgenes, ROIC, FCF, conversión, deuda, remuneración en acciones, recompras. Valuación con el precio de hoy (PER, P/V, EV/EBITDA, EV/EBIT, P/libro, rentabilidad del FCF). Consenso de analistas: precio objetivo, recomendaciones, estimaciones, revisiones, sorpresas y cambios de calificación. |
 | **Valuación y comparables** | PER histórico sin mirar el futuro, percentil contra su propia historia y tabla de comparables (PER, P/V, EV/EBITDA, márgenes, crecimiento, ROIC). Sugiere pares; vos decidís cuáles. |
 | **Perfil de riesgo** | Retorno, CAGR, Sharpe, Sortino, Calmar, volatilidad, beta, VaR y CVaR, caídas máximas, gráfico de caídas desde máximos, volatilidad móvil y volatilidad implícita de opciones con su percentil. |
 | **Mis criterios** | Tus umbrales (quedan guardados) evaluados contra el activo, con frecuencia histórica por horizonte de tenencia. |
@@ -131,12 +133,24 @@ información confidencial de clientes.
   avisa que la relación ADR/acciones puede distorsionar los múltiplos.
 - **Curvas de letras y CER**: se excluyen del gráfico los vencimientos de menos de 20 días y las
   tasas atípicas (por ejemplo, instrumentos que no son de tasa fija); quedan en gris en la tabla.
+- **Bonos en dólares**: cronogramas de las condiciones de emisión del canje de 2020 (pagos 9 de enero y 9
+  de julio, cupones *step up* en base 30/360). TIR efectiva anual con base actual/365 y liquidación T+1,
+  sobre precio sucio por cada 100 nominales originales. Paridad = precio / (valor residual + interés corrido).
+- **Clientes**: el valor de hoy usa el CCL de hoy; el costo, el CCL del día de compra, así el resultado en
+  dólares no se confunde con la devaluación. El riesgo se mide como si la cartera actual se hubiera tenido
+  todo el último año.
+- **APT**: regresión de los retornos semanales en dólares del activo contra los de cada factor. La prima
+  de cada factor arranca en su retorno histórico menos la tasa libre de riesgo y conviene reemplazarla.
+- **Optimización**: simulación de 5.000 carteras sin ventas en corto (pesos al azar) sobre dos años de
+  retornos diarios en dólares. Es una aproximación de la frontera eficiente, y es del pasado.
 - **ROIC**: resultado operativo después de impuestos sobre patrimonio + deuda − caja. Es una
   aproximación, no la definición contable.
 - **Sharpe**: sin tasa libre de riesgo. **Sortino**: con semidesvío (solo caídas).
 
 ## Seguridad y privacidad
 
+- **Los datos de clientes** se guardan en `datos/clientes.json`, en tu máquina. La carpeta está en el
+  `.gitignore`: nunca se sube al repositorio. Los prompts de IA de clientes no incluyen nombre ni contacto.
 - El servidor escucha solo en `127.0.0.1`; `HOST=0.0.0.0` lo abre a tu red (y tu clave de IA con él).
 - Las claves se leen de `.env` (cubierto por `.gitignore`) y nunca llegan al navegador.
 - Bloquea pedidos desde otros dominios (protección contra *DNS rebinding*) y exige JSON en
@@ -154,7 +168,7 @@ información confidencial de clientes.
 ## Desarrollo
 
 ```bash
-npm test     # 30+ tests sin red: cálculos, parsers, XBRL y todas las rutas de la API
+npm test     # 45 tests sin red: fórmulas, bonos, parsers, XBRL, clientes y todas las rutas de la API
 npm run dev  # reinicia el servidor al guardar
 ```
 
@@ -173,12 +187,16 @@ market-desk
 │   ├── argentina.mjs     dólar, riesgo país, inflación, REM, tasas, renta fija, BYMA, BCRA
 │   ├── mercado.mjs       tablero global, sectores, FRED, Fear & Greed, calendario
 │   ├── noticias.mjs      Google News y léxico bilingüe
+│   ├── bonos.mjs         soberanos en dólares: cronogramas, TIR, duration, paridad
+│   ├── clientes.mjs      clientes y valuación de carteras (datos en datos/, fuera de git)
+│   ├── carteras.mjs      supuestos de CAPM/WACC/DCF, APT y optimización
 │   ├── extras.mjs        volatilidad implícita y Finnhub
 │   └── ia.mjs            proveedores de IA
 ├── public/
 │   ├── index.html
 │   ├── css/app.css
-│   └── js/               main.js (enrutador, buscador, watchlist), util, charts, dossier y views/
+│   └── js/               main.js (enrutador, buscador, watchlist), util, charts, dossier,
+│                         finanzas.js (fórmulas, compartidas con el servidor) y views/
 └── test/                 node:test + fetch falso + fixtures
 ```
 
