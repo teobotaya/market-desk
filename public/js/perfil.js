@@ -1,20 +1,23 @@
-/* Cuestionario de perfil del inversor. Cubre el contenido mínimo que piden
-   las Normas de la CNV (Título VII, cap. II, art. 16 inc. j): experiencia,
-   conocimiento de los instrumentos, objetivo, situación financiera,
-   horizonte y pérdida tolerable. La CNV pide actualizarlo al menos una vez
-   por año. Lo usan el navegador y el servidor (mismo puntaje en los dos). */
+/* Cuestionario de perfil del inversor. Cubre los aspectos mínimos que piden
+   las Normas de la CNV (Título VII, cap. II, art. 16 inc. j): experiencia en
+   el mercado de capitales, conocimiento de los instrumentos, objetivos,
+   situación financiera, horizonte de inversión, proporción de los ahorros
+   destinada a estas inversiones y nivel de ahorros que el cliente está
+   dispuesto a arriesgar. La revisión es como mínimo anual o en la primera
+   operación posterior a ese plazo, y se registra la fecha de cada versión.
+   Lo usan el navegador y el servidor (mismo puntaje en los dos). */
 
 export const VIGENCIA_DIAS = 365;
-export const VERSION = 1;
+export const VERSION = 2;
 
 export const PREGUNTAS = [
   { id: "experiencia", texto: "¿Cuánta experiencia tiene invirtiendo en el mercado de capitales?", opciones: ["Ninguna", "Menos de 2 años", "Entre 2 y 5 años", "Más de 5 años"] },
   { id: "conocimiento", texto: "¿Qué instrumentos conoce y operó?", opciones: ["Solo plazo fijo o fondos money market", "Bonos, letras y fondos de renta fija", "Acciones y CEDEARs", "Opciones, futuros o posiciones apalancadas"] },
   { id: "objetivo", texto: "¿Cuál es el objetivo principal de esta inversión?", opciones: ["Preservar el capital", "Obtener una renta periódica", "Crecimiento moderado del capital", "Máximo crecimiento, aceptando mucha volatilidad"] },
-  { id: "patrimonio", texto: "¿Qué parte de su patrimonio representa esta inversión?", opciones: ["Más del 75%", "Entre 50% y 75%", "Entre 25% y 50%", "Menos del 25%"] },
+  { id: "patrimonio", texto: "¿Qué proporción de sus ahorros destina a esta inversión?", opciones: ["Más del 75%", "Entre 50% y 75%", "Entre 25% y 50%", "Menos del 25%"] },
   { id: "ingresos", texto: "¿Tiene ingresos estables y un fondo de reserva aparte de esta inversión?", opciones: ["Ni ingresos estables ni reserva", "Ingresos estables, sin reserva", "Ingresos estables y reserva de unos 3 meses", "Ingresos estables y reserva de más de 6 meses"] },
   { id: "horizonte", texto: "¿En cuánto tiempo podría necesitar este dinero?", opciones: ["Menos de 1 año", "Entre 1 y 3 años", "Entre 3 y 5 años", "Más de 5 años"] },
-  { id: "perdida", texto: "¿Qué caída máxima de la cartera toleraría sin cambiar de estrategia?", opciones: ["Hasta 5%", "Hasta 15%", "Hasta 25%", "Más de 25%"] },
+  { id: "perdida", texto: "¿Qué parte de lo invertido está dispuesto a arriesgar (la caída máxima que toleraría sin cambiar de estrategia)?", opciones: ["Hasta 5%", "Hasta 15%", "Hasta 25%", "Más de 25%"] },
   { id: "reaccion", texto: "Si la cartera cae 20% en un mes, ¿qué haría?", opciones: ["Vendería todo", "Vendería una parte", "Mantendría las posiciones", "Compraría más"] }
 ];
 

@@ -342,6 +342,20 @@ test("clientes: movimientos, rendimiento, agenda, perfil, objetivo y baja", asyn
   assert.ok(k2.alertas.some((a) => /más agresivo/.test(a.texto)), "perfil asignado más agresivo que el sugerido");
   assert.ok(k2.rebalanceo.filas.some((f) => f.ticker === "Efectivo"));
   assert.ok(!k2.alertas.some((a) => /pesa/.test(a.texto)));
+  const dsc = k2.rendimiento.descomposicion;
+  assert.ok(dsc && Number.isFinite(dsc.precioUsd) && Number.isFinite(dsc.efectoDolar));
+  assert.ok(Math.abs(dsc.precioUsd + dsc.rentasUsd - k2.rendimiento.twrUsd) < 1e-9, "precio + rentas = total");
+
+  /* Nueva versión del perfil: la anterior queda en el historial. Un perfil
+     vencido con operaciones posteriores genera alerta. */
+  const v2 = await enviar("PUT", `/api/clientes/${c.id}`, { cuestionario: { respuestas, fecha: "2025-03-01" } });
+  assert.equal(v2.historialPerfil.length, 1);
+  assert.equal(v2.historialPerfil[0].fecha, "2026-02-01");
+  assert.equal(v2.cuestionario.version, 2);
+  const k3 = await ok(`/api/clientes/${c.id}/cartera`);
+  assert.ok(k3.alertas.some((a) => /perfil vencido/.test(a.texto)), "operó con el perfil vencido");
+  const conTc = await enviar("PUT", `/api/clientes/${c.id}`, { movimientos: [...v2.movimientos, { tipo: "compra", ticker: "GGAL.BA", cantidad: 1, precio: 4000, fecha: "2026-08-03", tipoCambio: 1450 }] });
+  assert.equal(conTc.movimientos.find((m) => m.tipoCambio).tipoCambio, 1450);
 
   /* Validaciones. */
   const malo = (cuerpo) => get(`/api/clientes/${c.id}`, { metodo: "PUT", cuerpo: JSON.stringify(cuerpo) });
@@ -379,4 +393,13 @@ test("renta fija propia: LECAP, ONs, bonos nuevos, breakevens y CEDEARs", async 
   assert.ok(Math.abs(aapl.mepImplicito - 1570) < 1e-6, "MEP implícito = pesos / especie D");
   assert.ok(aapl.cclImplicito > 0 && aapl.ratio === 20);
   assert.ok((await ok("/api/ar/metodologia")).filas.length >= 5);
+  const { CER_SINTETICO } = await import("./fake-fetch.mjs");
+  const cer = await ok("/api/ar/cer");
+  assert.equal(cer.cerReferencia.valor, CER_SINTETICO);
+  const propios = cer.filas.filter((x) => x.fuente === "propia" && x.tir !== null);
+  assert.ok(propios.length >= 6, "bonos CER calculados en la app");
+  for (const x of propios) assert.ok(Math.abs(x.tir - TIR_SINTETICA.realCer * 100) < 0.05, `TIR real de ${x.ticker}: ${x.tir}`);
+  assert.ok(cer.filas.some((x) => x.fuente === "ArgentinaDatos"), "el resto, de ArgentinaDatos");
+  assert.ok(cer.filas.filter((x) => /^(TXM|DIC|PAR)/.test(x.ticker)).every((x) => x.dudosa), "duales y Discount/Par fuera de la curva");
+  assert.ok(b.implicita.length && b.implicita.every((x) => Math.abs(x.tirReal - TIR_SINTETICA.realCer * 100) < 0.1), "la inflación implícita usa la curva CER propia");
 });

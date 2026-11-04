@@ -10,7 +10,7 @@
    Uso: node --import ./test/fake-fetch.mjs server.mjs  (o importarlo en un test). */
 
 import fs from "node:fs";
-import { TASA_FIJA, ONS, DOLAR_NUEVOS } from "../lib/instrumentos.mjs";
+import { TASA_FIJA, ONS, DOLAR_NUEVOS, CER } from "../lib/instrumentos.mjs";
 
 const AR = JSON.parse(fs.readFileSync(new URL("./fixtures/argentina.json", import.meta.url), "utf8"));
 export const llamadas = [];
@@ -283,13 +283,20 @@ const BONOS_USD = { AL29: 58, GD29: 59, AL30: 61, GD30: 62, AL35: 74, GD35: 76, 
    futuros descontados a una tasa fija (así la TIR calculada es conocida). */
 const hoyF = () => new Date(Date.now() + 864e5).toISOString().slice(0, 10);
 const valorPresente = (flujos, tasa) => flujos.filter(([f]) => f > hoyF()).reduce((s, [f, m]) => s + m / (1 + tasa) ** ((Date.parse(f) - Date.parse(hoyF())) / 864e5 / 365), 0);
-export const TIR_SINTETICA = { ons: 0.075, nuevos: 0.07, temLecap: 0.022 };
+export const TIR_SINTETICA = { ons: 0.075, nuevos: 0.07, temLecap: 0.022, realCer: 0.05 };
+/* CER sintético constante: así el coeficiente no depende del día del test. */
+export const CER_SINTETICO = 720;
+function flujosRealesCer(def) {
+  let residual = 1;
+  return def.flujos.map(([f, am, tasa, base]) => { const c = residual * tasa * base; residual -= am; return [f, (am + c) * 100]; });
+}
 
 function precioSintetico(tipo, s) {
   const usd = BONOS_USD[s.replace(/D$/, "")];
   if (tipo === "arg_bonds" && usd) return s.endsWith("D") ? usd : usd * 1570;
   if (TASA_FIJA[s]) return TASA_FIJA[s].pagoFinal / (1 + TIR_SINTETICA.temLecap) ** (((Date.parse(TASA_FIJA[s].vence) - Date.parse(hoyF())) / 864e5) / 30);
   if (tipo === "arg_corp" && ONS[s]) return valorPresente(ONS[s].flujos, TIR_SINTETICA.ons);
+  if (CER[s]) return valorPresente(flujosRealesCer(CER[s]), TIR_SINTETICA.realCer) * (CER_SINTETICO / CER[s].cerEmision);
   const nuevo = DOLAR_NUEVOS[s.replace(/D$/, "")];
   if (tipo === "arg_bonds" && nuevo) return s.endsWith("D") ? valorPresente(nuevo.flujos, TIR_SINTETICA.nuevos) : valorPresente(nuevo.flujos, TIR_SINTETICA.nuevos) * 1570;
   if (tipo === "arg_cedears" && s.length > 2 && s.endsWith("D") && !s.startsWith("D")) return base(`${s.slice(0, -1)}.BA`) / 1570;
@@ -300,8 +307,8 @@ function panelBYMA(tipo) {
   const listas = {
     arg_stocks: ["GGAL", "YPFD", "PAMP", "ALUA", "BMA", "TXAR", "CEPU", "LOMA", "TGSU2", "SUPV", "BBAR", "COME", "EDN", "CRES", "IRSA", "METR", "TECO2", "TRAN", "VALO", "BYMA", "MOLI", "HARG", "AGRO"],
     arg_cedears: ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "KO", "MELI", "SPY", "QQQ", "AAPLD", "MSFTD", "KOD"],
-    arg_bonds: [...Object.keys(BONOS_USD).flatMap((t) => [t, `${t}D`]), "T15E7", "AO27", "AO27D", "AN29D"],
-    arg_notes: ["S13N6", "S30N6"],
+    arg_bonds: [...Object.keys(BONOS_USD).flatMap((t) => [t, `${t}D`]), "T15E7", "AO27", "AO27D", "AN29D", "TZXD6", "TZXM7", "TZX27", "TZXD7", "TZX28", "TX28", "TX31"],
+    arg_notes: ["S13N6", "S30N6", "X30N6"],
     arg_corp: ["YMCXO", "TLC1O", "PNDCO", "YMCXD", "MGCOD", "VSCTD", "TSC4D"],
     usa_adrs: ["GGAL", "YPF", "PAM", "BMA", "TEO", "CEPU"]
   };
@@ -386,10 +393,11 @@ async function falso(entrada, init = {}) {
     /* Series diarias (v4): límites de la banda cambiaria. */
     const serie = p.match(/\/Monetarias\/(\d+)$/);
     if (serie) {
-      const valores = { 1187: 690, 1188: 1980 };
+      const valores = { 1187: 690, 1188: 1980, 30: CER_SINTETICO };
       const v = valores[serie[1]];
       if (!v) return json({ status: 404, errorMessages: ["sin serie"] }, 404);
-      return json({ status: 200, results: [{ idVariable: Number(serie[1]), detalle: habiles(20).map((d, i) => ({ fecha: iso(d), valor: v * (1 + (serie[1] === "1188" ? 1 : -1) * 0.0006 * i) })) }] });
+      const paso = { 1188: 0.0006, 1187: -0.0006, 30: 0 }[serie[1]];
+      return json({ status: 200, results: [{ idVariable: Number(serie[1]), detalle: habiles(40).map((d, i) => ({ fecha: iso(d), valor: v * (1 + paso * i) })) }] });
     }
     return json({ status: 200, results: [
       { idVariable: 1, descripcion: "Reservas internacionales (sintético)", categoria: "Principales Variables", ultFechaInformada: iso(Date.now()), ultValorInformado: 41000, unidadExpresion: "Millones de USD" },

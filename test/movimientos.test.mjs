@@ -122,3 +122,24 @@ test("cuestionario de perfil: puntaje, topes y vencimiento", () => {
   assert.equal(puntuar({ experiencia: 1 }).completo, false);
   assert.equal(vencimiento("2026-01-15"), "2027-01-15");
 });
+
+test("tipo de cambio propio en un movimiento reemplaza al CCL de la fecha", () => {
+  const info = () => ({ moneda: "ARS", factor: 1 });
+  const ccl = () => 1500;
+  const { tenencias: t } = tenencias([
+    { tipo: "compra", ticker: "A", cantidad: 10, precio: 1500, fecha: "2026-01-05", tipoCambio: 1200 },
+    { tipo: "compra", ticker: "A", cantidad: 10, precio: 1500, fecha: "2026-01-06" }
+  ], info, ccl);
+  cerca(t[0].costoUsd, 15000 / 1200 + 15000 / 1500, 1e-9);
+});
+
+test("cronograma del GD41 cotejado: 3,5% hasta julio de 2029, 4,875% después, 28 cuotas desde 2028", async () => {
+  const { cronograma } = await import("../lib/bonos.mjs");
+  const c = cronograma("GD41");
+  const de = (f) => c.find((x) => x.fecha === f);
+  assert.equal(de("2026-07-09").tasa, 3.5);
+  cerca(de("2028-01-09").total, 1.75 + 100 / 28, 1e-9, "primera cuota: 3,5714 + 1,75 de renta (≈5,3 cada 100)");
+  assert.equal(de("2030-01-09").tasa, 4.875);
+  assert.equal(c.filter((x) => x.amortizacion > 0).length, 28);
+  cerca(c.at(-1).residual, 0, 1e-9);
+});

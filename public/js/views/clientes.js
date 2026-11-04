@@ -144,7 +144,7 @@ async function cuestionario(el, ctx, c) {
   const { perfiles } = await api("/api/clientes");
   const q = c.cuestionario;
   el.innerHTML = `<form class="card form-cliente" novalidate>
-    <header class="card-h"><div><h3>Perfil del inversor · ${esc(c.nombre)}</h3><p class="card-sub">Cubre el contenido mínimo de las Normas de la CNV (Título VII, cap. II, art. 16): experiencia, conocimiento de los instrumentos, objetivo, situación financiera, horizonte y pérdida tolerable. Hay que actualizarlo al menos una vez por año.${q ? ` Última versión: ${fecha(q.fecha)} (vence ${fecha(vencimiento(q.fecha))}).` : ""}</p></div></header>
+    <header class="card-h"><div><h3>Perfil del inversor · ${esc(c.nombre)}</h3><p class="card-sub">Cubre los aspectos mínimos de las Normas de la CNV (Título VII, cap. II, art. 16 inc. j): experiencia, conocimiento de los instrumentos, objetivo, situación financiera, horizonte, proporción de los ahorros destinada y nivel que el cliente está dispuesto a arriesgar. Se revisa al menos una vez por año o en la primera operación posterior a ese plazo; cada versión queda registrada con su fecha.${q ? ` Última versión: ${fecha(q.fecha)} (vence ${fecha(vencimiento(q.fecha))}).` : ""}</p></div></header>
     ${PREGUNTAS.map((p, i) => `<fieldset class="pregunta"><legend>${i + 1}. ${esc(p.texto)}</legend>${p.opciones.map((o, j) => `<label class="opcion"><input type="radio" name="${p.id}" value="${j}"${q?.respuestas?.[p.id] === j ? " checked" : ""}> ${esc(o)}</label>`).join("")}</fieldset>`).join("")}
     <div class="grupo-titulo" style="margin-top:14px">Perfil transaccional (UIF)</div>
     <div class="form-grid">
@@ -153,6 +153,7 @@ async function cuestionario(el, ctx, c) {
       <label class="campo"><span>Fecha del cuestionario</span><input name="fecha" type="date" max="${hoy()}" value="${esc(q?.fecha || hoy())}"></label>
     </div>
     <div class="card" style="margin:14px 0 0" data-resultado></div>
+    ${c.historialPerfil?.length ? `<div class="grupo-titulo" style="margin-top:14px">Versiones anteriores</div><table><thead><tr><th>Fecha</th><th class="n">Puntaje</th><th>Sugerido</th><th>Asignado entonces</th></tr></thead><tbody>${c.historialPerfil.map((h) => `<tr><td>${fecha(h.fecha)}</td><td class="n">${h.puntaje}</td><td>${esc(PERFIL[h.sugerido] || h.sugerido)}</td><td>${esc(PERFIL[h.perfilAsignado] || h.perfilAsignado || "—")}</td></tr>`).join("")}</tbody></table>` : ""}
     <div class="fila"><button class="btn primario" type="submit">Guardar cuestionario</button><button class="btn" type="button" data-aplicar>Guardar y aplicar el perfil sugerido</button><button class="btn" type="button" data-cancelar>Cancelar</button><span class="nota" data-estado style="margin:0"></span></div>
     <p class="nota">El perfil transaccional queda solo en este archivo y no se manda a ningún proveedor de IA.</p>
   </form>`;
@@ -196,6 +197,7 @@ const COLUMNAS = {
   precio: ["precio", "price", "precio unitario"],
   comision: ["comision", "comisiones", "gastos", "aranceles", "fee"],
   monto: ["monto", "importe", "amount", "neto"],
+  tipoCambio: ["tipo de cambio", "tipo cambio", "tc", "cotizacion dolar", "dolar"],
   moneda: ["moneda", "currency"],
   concepto: ["concepto"],
   nota: ["nota", "observacion", "observaciones", "detalle"]
@@ -240,13 +242,15 @@ function leerCsv(texto) {
     const t = tipoCsv(v("tipo")), f = fechaCsv(v("fecha"));
     if (!t || !f) { errores.push(`Fila ${i + 2}: ${!t ? `tipo "${v("tipo")}" desconocido` : `fecha "${v("fecha")}" inválida`}`); return; }
     const m = { ...t, fecha: f, ticker: v("ticker").toUpperCase(), nota: v("nota") };
+    const tc = numeroCsv(v("tipoCambio"));
+    if (tc > 0) m.tipoCambio = tc;
     if (t.tipo === "renta") { m.monto = numeroCsv(v("monto")); m.moneda = /ars|\$|peso/i.test(v("moneda")) && !/us/i.test(v("moneda")) ? "ARS" : "USD"; if (v("concepto")) m.concepto = normal(v("concepto")).replace("cupon", "cupón").replace("amortizacion", "amortización"); }
     else { m.cantidad = Math.abs(numeroCsv(v("cantidad")) ?? 0); m.precio = numeroCsv(v("precio")); m.comision = Math.abs(numeroCsv(v("comision")) ?? 0); }
     movimientos.push(m);
   });
   return { movimientos, errores };
 }
-const PLANTILLA = "fecha;tipo;ticker;cantidad;precio;comision;monto;moneda;concepto;nota\n15/01/2026;compra;GGAL.BA;100;4250,50;12,30;;;;\n02/03/2026;compra;GD30D;1000;62,15;;;;;Globales en dólares MEP\n09/07/2026;renta;GD30D;;;;82,40;USD;cupón;\n01/08/2026;venta;GGAL.BA;40;5100;8;;;;\n";
+const PLANTILLA = "fecha;tipo;ticker;cantidad;precio;comision;monto;moneda;concepto;tipo de cambio;nota\n15/01/2026;compra;GGAL.BA;100;4250,50;12,30;;;;;\n02/03/2026;compra;GD30D;1000;62,15;;;;;1415;Dólares comprados al MEP\n09/07/2026;renta;GD30D;;;;82,40;USD;cupón;;\n01/08/2026;venta;GGAL.BA;40;5100;8;;;;;\n";
 
 /* ----------------------------------------------------------- detalle */
 
@@ -288,7 +292,10 @@ async function detalle(el, ctx, id) {
       <div class="grid2" style="margin:12px 0 0">
         <table><thead><tr><th>Desde ${fecha(R.desde)}</th><th class="n">Total</th><th class="n">Anual</th></tr></thead><tbody>
           <tr><td><b>Cartera en dólares (TWR)</b></td><td class="n ${cls(R.twrUsd)}"><b>${pctS(R.twrUsd, 1)}</b></td><td class="n">${R.twrUsdAnual !== null ? pctS(R.twrUsdAnual, 1) : "—"}</td></tr>
+          ${R.descomposicion ? `<tr><td class="faint">&nbsp;&nbsp;de precio</td><td class="n ${cls(R.descomposicion.precioUsd)}">${pctS(R.descomposicion.precioUsd, 1)}</td><td></td></tr>
+          <tr><td class="faint">&nbsp;&nbsp;de rentas (cupones y dividendos)</td><td class="n ${cls(R.descomposicion.rentasUsd)}">${pctS(R.descomposicion.rentasUsd, 1)}</td><td></td></tr>` : ""}
           <tr><td><b>Cartera en pesos (TWR)</b></td><td class="n ${cls(R.twrArs)}"><b>${pctS(R.twrArs, 1)}</b></td><td class="n">${R.twrArsAnual !== null ? pctS(R.twrArsAnual, 1) : "—"}</td></tr>
+          ${R.descomposicion ? `<tr><td class="faint">&nbsp;&nbsp;efecto del dólar (pesos → dólares)</td><td class="n ${cls(R.descomposicion.efectoDolar)}">${pctS(R.descomposicion.efectoDolar, 1)}</td><td></td></tr>` : ""}
           ${R.benchmarks.map((b) => `<tr><td>${esc(b.nombre)} <span class="faint">(${b.moneda === "USD" ? "dólares" : "pesos"})</span></td><td class="n ${cls(b.valor)}">${pctS(b.valor, 1)}</td><td class="n faint">${b.valor !== null && R.anios >= 1 ? pctS(((1 + b.valor / 100) ** (1 / R.anios) - 1) * 100, 1) : "—"}</td></tr>`).join("")}
           <tr><td>TIR de la cartera (dinero)</td><td class="n">${R.multiploUsd !== null ? pctS(R.multiploUsd, 1) : "—"}<span class="sub">sobre lo invertido</span></td><td class="n">${R.tirUsd !== null ? pctS(R.tirUsd, 1) : "—"}</td></tr>
         </tbody></table>
@@ -307,6 +314,7 @@ async function detalle(el, ctx, id) {
         <input name="monto" type="number" min="0" step="any" placeholder="Monto cobrado" aria-label="Monto" data-solo="r" hidden>
         <select name="moneda" aria-label="Moneda" data-solo="r" hidden><option value="USD">US$</option><option value="ARS">$</option></select>
         <select name="concepto" aria-label="Concepto" data-solo="r" hidden><option value="cupón">Cupón</option><option value="amortización">Amortización</option><option value="dividendo">Dividendo</option><option value="otro">Otro</option></select>
+        <input name="tipoCambio" type="number" min="0" step="any" placeholder="Tipo de cambio (opcional)" aria-label="Tipo de cambio" title="Si queda vacío se usa el CCL de esa fecha">
         <button class="btn" type="button" data-precio-hoy data-solo="cv" title="Completa con el último precio">Precio de hoy</button>
         <button class="btn primario" type="submit">Agregar</button>
         <span class="nota" data-estado style="margin:0"></span>
@@ -316,7 +324,7 @@ async function detalle(el, ctx, id) {
         <div class="fila"><input type="file" accept=".csv,text/csv,text/plain" data-archivo><button class="btn" type="button" data-plantilla>Descargar plantilla</button></div>
         <div data-previa></div>
       </details>
-      <p class="nota">Precio en la moneda en que cotiza el activo (pesos en BYMA, dólares en la especie D o en el exterior). En bonos, letras y ONs, la cantidad va en nominales y el precio cada 100 nominales. Una venta no puede superar la tenencia a su fecha.</p>`)}
+      <p class="nota">Precio en la moneda en que cotiza el activo (pesos en BYMA, dólares en la especie D o en el exterior). En bonos, letras y ONs, la cantidad va en nominales y el precio cada 100 nominales. El tipo de cambio es opcional: si los dólares se compraron a otro precio (MEP, por ejemplo), cargalo y se usa en lugar del CCL de esa fecha. Una venta no puede superar la tenencia a su fecha.</p>`)}
     ${k.agenda.length || k.sensibilidad ? `<div class="grid2">
       ${tarjeta("Agenda de cobros (12 meses)", k.agenda.length ? `<div class="kpis compactos" style="margin:0 0 10px">${kpi("A cobrar en 12 meses", usd(k.agenda.reduce((s, f) => s + (f.totalUsd || 0), 0)), "cupones, amortizaciones y vencimientos")}${kpi("Próximo cobro", fecha(k.agenda[0].fecha), `${esc(k.agenda[0].ticker)} · ${k.agenda[0].moneda === "USD" ? "US$" : "$"} ${num(k.agenda[0].total, 2)}`)}</div><div data-agenda></div>` : `<p class="vacio">Sin bonos, ONs ni letras con flujos conocidos.</p>`)}
       ${tarjeta("Sensibilidad de la renta fija en dólares", k.sensibilidad ? `<div class="kpis compactos" style="margin:0 0 10px">${kpi("DV01", usd(k.sensibilidad.dv01Usd), "lo que se pierde si las TIR suben 1 pb")}${kpi("Duration modificada", num(k.sensibilidad.mdPromedio, 2), "promedio ponderado")}${kpi("Con +100 pb", usd(-k.sensibilidad.dv01Usd * 100), "aproximado", "down")}</div>
@@ -399,6 +407,7 @@ async function detalle(el, ctx, id) {
         { k: "precio", t: "Precio", n: true, fmt: (v, m) => (m.tipo === "renta" ? "" : precio(v)) },
         { k: "monto", t: "Monto", n: true, fmt: (v, m) => (m.tipo === "renta" ? `${m.moneda === "USD" ? "US$" : "$"} ${num(v, 2)}` : "") },
         { k: "comision", t: "Comisión", n: true, fmt: (v) => (v ? num(v, 2) : "") },
+        { k: "tipoCambio", t: "TC", n: true, fmt: (v) => (v ? num(v, 2) : `<span class="faint">CCL</span>`), csv: (v) => v || "" },
         { k: "nota", t: "Nota", fmt: esc },
         { k: "id", t: "", fmt: (v) => `<button class="btn chico" data-quitar="${esc(v)}" title="Borrar movimiento">Borrar</button>`, csv: () => "" }
       ],
@@ -433,6 +442,7 @@ async function detalle(el, ctx, id) {
     e.preventDefault();
     const tipo = f.tipo.value;
     const nuevo = { tipo, fecha: f.fecha.value, ticker: f.ticker.value.trim() };
+    if (Number(f.tipoCambio.value) > 0) nuevo.tipoCambio = Number(f.tipoCambio.value);
     if (tipo === "renta") {
       Object.assign(nuevo, { monto: Number(f.monto.value), moneda: f.moneda.value, concepto: f.concepto.value });
       if (!(nuevo.monto > 0)) { estado.innerHTML = `<span class="down">Completá el monto cobrado.</span>`; return; }

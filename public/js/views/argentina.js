@@ -184,18 +184,19 @@ async function tasas(el) {
     });
   }).catch((e) => { el.querySelector("[data-letras]").innerHTML = tarjeta("Tasa fija", errorHtml(e)); });
 
-  const rf = api("/api/ar/rentafija").then((d) => {
-    R.rf = d;
+  /* Bonos CER calculados en la app (CER del BCRA con rezago de 10 días
+     hábiles); el resto, de ArgentinaDatos, marcado. */
+  const rf = api("/api/ar/cer").then((d) => {
+    R.cer = d;
     const c = el.querySelector("[data-cer]");
-    if (d.cer?.length) {
-      const k = curva(d.cer, "tir");
-      c.innerHTML = tarjeta("Bonos ajustados por CER", `<div data-g></div><div data-t></div><p class="nota">TIR real (por encima de la inflación) según plazo, escala logarítmica. ${notaFuera(k.fuera)} Actualizado ${esc(fechaHora(d.cerFecha))}. Fuente: ArgentinaDatos, que mezcla bonos CER puros con duales CER/TAMAR: tomalo como referencia y cotejá las TIR atípicas.</p>`);
-      graficoLineas(c.querySelector("[data-g]"), [{ nombre: "TIR real", datos: k.dentro.map((x) => ({ x: x.dias, v: x.tir, etiqueta: x.ticker })), color: "var(--c4)", puntos: true, etiquetas: true }], { xNum: true, escalaX: "log", alto: 200, cero: true, fmtY: (v) => `${num(v, 1)}%`, etiquetasX: marcasPlazo(k.dentro) });
-      tablaOrdenable(c.querySelector("[data-t]"), {
-        columnas: [{ k: "ticker", t: "Ticker" }, { k: "precio", t: "Precio", n: true, fmt: (v) => num(v, 2) }, { k: "tir", t: "TIR real", n: true, fmt: (v) => pct(v, 2), cls: cls }, { k: "dias", t: "Días", n: true }, { k: "vencimiento", t: "Vence", n: true, fmt: fecha }],
-        filas: d.cer, nombreCsv: "bonos-cer", claseFila: (f) => (k.fuera.includes(f) ? "faint" : "")
-      });
-    } else c.innerHTML = tarjeta("Bonos CER", `<div class="msg">Sin datos de bonos CER ahora.</div>`);
+    if (!d.filas.length) { c.innerHTML = tarjeta("Bonos CER", `<div class="msg">Sin datos de bonos CER ahora.</div>`); return; }
+    const fuera = d.filas.filter((f) => f.dudosa);
+    c.innerHTML = tarjeta("Bonos ajustados por CER", `${d.avisos.length ? `<div class="msg">${d.avisos.map(esc).join(" ")}</div>` : ""}<div data-g></div><div data-t></div><p class="nota">TIR real (por encima de la inflación) según plazo, escala logarítmica.${d.cerReferencia ? ` CER de referencia: ${num(d.cerReferencia.valor, 4)} (${fecha(d.cerReferencia.fecha)}, 10 días hábiles antes de la liquidación).` : ""} ${d.curvaFuente === "propia" ? "La curva usa solo los bonos calculados en la app." : ""} ${fuera.length ? `En gris y fuera de la curva: ${fuera.map((x) => esc(x.ticker)).join(", ")} (duales CER/TAMAR, Discount y Par, menos de 30 días o TIR atípica).` : ""} ${esc(d.fuente)}.</p>`);
+    graficoLineas(c.querySelector("[data-g]"), [{ nombre: "TIR real", datos: d.curva.map((x) => ({ x: x.dias, v: x.tir, etiqueta: x.ticker })), color: "var(--c4)", puntos: true, etiquetas: true }], { xNum: true, escalaX: "log", alto: 200, cero: true, fmtY: (v) => `${num(v, 1)}%`, etiquetasX: marcasPlazo(d.curva) });
+    tablaOrdenable(c.querySelector("[data-t]"), {
+      columnas: [{ k: "ticker", t: "Ticker", fmt: (v, f) => `<b>${esc(v)}</b>${f.fuente !== "propia" ? `<span class="sub">ArgentinaDatos</span>` : ""}` }, { k: "precio", t: "Precio", n: true, fmt: (v) => num(v, 2) }, { k: "coeficiente", t: "Coef. CER", n: true, fmt: (v) => num(v, 4) }, { k: "tir", t: "TIR real", n: true, fmt: (v) => pct(v, 2), cls: cls }, { k: "md", t: "MD", n: true, fmt: (v) => num(v, 2) }, { k: "dias", t: "Días", n: true, fmt: (v) => num(v, 0) }, { k: "vencimiento", t: "Vence", n: true, fmt: fecha }],
+      filas: d.filas, nombreCsv: "bonos-cer", claseFila: (f) => (f.dudosa ? "faint" : "")
+    });
   }).catch((e) => { el.querySelector("[data-cer]").innerHTML = tarjeta("Bonos CER", errorHtml(e)); });
 
   const imp = api("/api/ar/implicito").then((d) => {
@@ -220,7 +221,7 @@ LETRAS DE TASA FIJA (calculadas desde el pago final)
 ${R.fija?.curva?.map((x) => `- ${x.ticker}: ${num(x.dias, 0)} días · TNA ${pct(x.tna, 2)} · TEA ${pct(x.tea, 2)} · TEM ${pct(x.tem, 2)}`).join("\n") || "(sin datos)"}
 
 BONOS CER (TIR real)
-${R.rf?.cer?.map((x) => `- ${x.ticker}: ${x.dias} días · TIR ${pct(x.tir, 2)}`).join("\n") || "(sin datos)"}
+${R.cer?.curva?.map((x) => `- ${x.ticker}: ${num(x.dias, 0)} días · TIR real ${pct(x.tir, 2)}`).join("\n") || "(sin datos)"}
 
 Devolvé:
 1. FORMA DE LA CURVA: pendiente de la curva de letras y qué tasa de corto descuenta a futuro.
@@ -277,20 +278,6 @@ async function byma(el, ctx) {
   cargar();
 }
 
-/* Puntos que entran en la curva: se dejan afuera los vencimientos de menos
-   de 20 días (la tasa anualizada de un bono que vence mañana explota con
-   cualquier centavo) y las tasas atípicas, típicamente instrumentos que no
-   son de tasa fija (duales, ajustables) mezclados en el mismo listado. El
-   criterio es robusto: distancia a la mediana medida en desvíos absolutos. */
-function curva(lista, campo) {
-  const candidatos = lista.filter((x) => x.dias >= 20 && Number.isFinite(x[campo]));
-  const med = mediana(candidatos.map((x) => x[campo]));
-  const mad = mediana(candidatos.map((x) => Math.abs(x[campo] - med)));
-  const limite = Math.max(8, 5 * (mad || 0));
-  const dentro = candidatos.filter((x) => Math.abs(x[campo] - med) <= limite);
-  return { dentro, fuera: lista.filter((x) => !dentro.includes(x)) };
-}
-const notaFuera = (fuera) => (fuera.length ? `Fuera del gráfico (en gris en la tabla): ${fuera.map((x) => esc(x.ticker)).join(", ")}, por vencer en menos de 20 días o tener una tasa atípica para la curva.` : "");
 function marcasPlazo(pts) {
   if (!pts.length) return [];
   const min = Math.min(...pts.map((x) => x.dias)), max = Math.max(...pts.map((x) => x.dias));

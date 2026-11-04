@@ -122,6 +122,7 @@ const routes = {
   "/api/ar/bonos": () => bonos.bonosDolar(),
   "/api/ar/bono": (u) => bonos.bonoDetalle(p(u, "t")),
   "/api/ar/tasafija": () => rf.tasaFija(),
+  "/api/ar/cer": () => rf.bonosCer(),
   "/api/ar/ons": () => rf.obligaciones(),
   "/api/ar/dolar-nuevos": () => rf.dolarNuevos(),
   "/api/ar/breakevens": () => rf.breakevens(),
