@@ -69,7 +69,7 @@ Todas gratuitas. Las de la tabla funcionan **sin clave**.
 | Fuente | Qué aporta |
 |---|---|
 | [Yahoo Finance](https://finance.yahoo.com) | Precios diarios (EE.UU., BYMA, índices, monedas, futuros, cripto), dividendos y splits, buscador, consenso de analistas, estimaciones y pares sugeridos |
-| [Nasdaq](https://www.nasdaq.com) | Precios de respaldo y calendario de balances |
+| [Nasdaq](https://www.nasdaq.com) | Precios de respaldo (acciones, ETFs, Nasdaq Composite y 100, Bitcoin y Ethereum) y calendario de balances |
 | [Stooq](https://stooq.com) | Precios de respaldo |
 | [SEC EDGAR](https://www.sec.gov/edgar) | Estados financieros XBRL (US GAAP e IFRS), 10-K/20-F, presentaciones, formularios 4 |
 | [FRED](https://fred.stlouisfed.org) | Tasas del Tesoro, curva, tasas reales, inflación implícita, spreads de crédito (CSV público, sin clave). Respaldo de índices, VIX, tasas, petróleo, gas, monedas y cripto cuando Yahoo no responde |
@@ -79,6 +79,8 @@ Todas gratuitas. Las de la tabla funcionan **sin clave**.
 | [ArgentinaDatos](https://argentinadatos.com) | Historia del dólar, riesgo país, inflación, REM, plazo fijo, cauciones, FCI, letras y bonos CER |
 | [data912](https://data912.com) | Paneles de BYMA (precios de bonos, letras, ONs y CEDEARs para los cálculos propios, incluido el dólar implícito por bono y por CEDEAR), historia de bonos, volatilidad implícita de opciones |
 | [BYMA Datos Abiertos](https://open.bymadata.com.ar) | Merval oficial (MSCI Merval desde el 19/10/2026) |
+| [Frankfurter](https://frankfurter.dev) (BCE) | Respaldo de monedas: tipos de referencia diarios del Banco Central Europeo; el DXY se reconstruye con la fórmula del ICE |
+| [Kraken](https://docs.kraken.com/api/) | Respaldo de oro (PAXG, respaldado por una onza troy) y cripto |
 | [BCRA](https://www.bcra.gob.ar/apis-banco-central/) | Variables monetarias oficiales y límites de la banda cambiaria (API v4, series 1187 y 1188) |
 | [TradingView](https://www.tradingview.com/widget-docs/) | Widgets embebidos (se cargan en tu navegador) |
 
@@ -86,9 +88,11 @@ Opcional con clave gratuita: **[Finnhub](https://finnhub.io)** (`FINNHUB_API_KEY
 de recomendaciones, sorpresas de ganancias, pares de industria y métricas cuando Yahoo no responde.
 
 Si una fuente cae, la app lo dice en la tarjeta correspondiente y el resto sigue funcionando (pasando
-el mouse sobre "sin datos" se ve el motivo). Los precios pasan por una cadena: Yahoo → FRED (índices,
-tasas, VIX, energía, monedas y cripto, con el valor real del índice) → Nasdaq → Stooq, data912 para
-BYMA y BYMA para el Merval. Una serie con más de 10 días de atraso se considera desactualizada: se prueba
+el mouse sobre "sin datos" se ve el motivo). Si Yahoo no responde, cada activo tiene su respaldo, en este
+orden: el mismo dato en otra fuente (FRED para índices, tasas, VIX y energía; BCE para monedas; Kraken para
+oro; Nasdaq para el Nasdaq y cripto) y, como último recurso, un ETF que lo sigue (SLV para la plata, CPER
+para el cobre, EWZ para Bovespa…). Cada fila del resumen dice de dónde sale. data912 cubre BYMA y BYMA, el
+Merval. Una serie con más de 10 días de atraso se considera desactualizada: se prueba
 la fuente siguiente y, si ninguna tiene algo más nuevo, se muestra con su fecha. En el resumen, todo
 dato de más de 4 días aparece con su fecha y su fuente.
 
@@ -225,7 +229,7 @@ información confidencial de clientes.
 ## Desarrollo
 
 ```bash
-npm test     # 62 tests sin red: fórmulas, bonos, TWR y TIR, parsers, XBRL, clientes, fuentes y todas las rutas de la API
+npm test     # 63 tests sin red: fórmulas, bonos, TWR y TIR, parsers, XBRL, clientes, fuentes y todas las rutas de la API
 npm run dev  # reinicia el servidor al guardar
 ```
 
@@ -245,6 +249,7 @@ market-desk
 │   ├── argentina.mjs     dólar, riesgo país, inflación, REM, tasas, renta fija, BYMA, BCRA
 │   ├── mercado.mjs       tablero global, sectores, FRED, Fear & Greed, calendario
 │   ├── fred.mjs          series de FRED y respaldo de precios cuando Yahoo no responde
+│   ├── respaldos.mjs     respaldos sin clave: monedas del BCE (Frankfurter) y Kraken
 │   ├── byma.mjs          índices de BYMA (Merval), con el cambio de base a MSCI
 │   ├── noticias.mjs      Google News y léxico bilingüe
 │   ├── bonos.mjs         soberanos en dólares: cronogramas, TIR, duration, paridad
