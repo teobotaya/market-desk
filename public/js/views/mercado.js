@@ -31,7 +31,7 @@ export default {
         <div class="tabla-scroll"><table><thead><tr><th>Activo</th><th class="n">Último</th><th class="n">Día</th><th class="n">Mes</th><th class="n">Año</th><th class="n">3 meses</th></tr></thead><tbody>
         ${g.items.map((x) => x.error
           ? `<tr><td>${esc(x.nombre)}</td><td colspan="5" class="faint" title="${esc(x.error)}">sin datos</td></tr>`
-          : `<tr class="clic" data-t="${esc(x.ticker)}" title="${esc(x.ticker)} · ${esc(x.fuente)} · ${fecha(x.fecha)}"><td>${esc(x.nombre)}${atrasado(x.fecha) ? `<span class="sub warn">al ${fecha(x.fecha)} · ${esc(x.fuente)}</span>` : ""}</td>
+          : `<tr class="clic" data-t="${esc(x.ticker)}" title="${esc(x.ticker)} · ${esc(x.fuente)} · ${fecha(x.fecha)}${x.nota ? ` · ${esc(x.nota)}` : ""}"><td>${esc(x.nombre)}${atrasado(x.fecha) ? `<span class="sub warn">al ${fecha(x.fecha)} · ${esc(x.fuente)}</span>` : x.nota ? `<span class="sub warn">vía ${esc(x.fuente)}${x.simbolo && x.simbolo !== x.ticker ? ` (${esc(x.simbolo)})` : ""}</span>` : ""}</td>
               <td class="n">${g.tasa ? `${num(x.last, 2)}%` : precio(x.last)}</td>
               <td class="n ${cls(x.ret1)}">${pctS(x.ret1, 1)}</td><td class="n ${cls(x.ret21)}">${pctS(x.ret21, 1)}</td><td class="n ${cls(x.retYtd)}">${pctS(x.retYtd, 1)}</td>
               <td class="n">${sparkline(x.spark, { w: 64, h: 20 })}</td></tr>`).join("")}

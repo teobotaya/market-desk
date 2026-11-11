@@ -353,15 +353,44 @@ const cabecera = (init, nombre) => {
   return k ? String(h[k]) : "";
 };
 const pareceNavegador = (ua) => /Chrome\/|Firefox\/|Safari\//.test(ua);
-/* Símbolos que Yahoo "no sirve" en los tests, para probar el respaldo de FRED. */
-export const YAHOO_CAIDO = new Set(["ETH-USD"]);
+/* Símbolos que Yahoo "no sirve" en los tests, para probar los respaldos, y
+   un interruptor para simular a Yahoo caído del todo. */
+export const YAHOO_CAIDO = new Set(["ETH-USD", "^VIX"]);
+export const YAHOO_ABAJO = { activo: false };
+
+/* Respaldos: Nasdaq (acciones, ETFs, índices COMP y NDX, cripto BTC y ETH),
+   tipos del BCE (Frankfurter) y Kraken. */
+const fechaUs = (t) => { const d = new Date(t * 1000); return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}/${d.getUTCFullYear()}`; };
+const NASDAQ_CLASES = { COMP: "index", NDX: "index", BTC: "crypto", ETH: "crypto" };
+function nasdaqHistoria(sym, clase) {
+  const valida = NASDAQ_CLASES[sym] ? NASDAQ_CLASES[sym] === clase : (clase === "stocks" || clase === "etf");
+  if (sym.startsWith("NOEXISTE") || !valida) return json({ data: null, status: { rCode: 400, bCodeMessage: [{ code: 1001, errorMessage: "Symbol not exists." }] } });
+  const filas = velas(`nasdaq:${sym}`, 500).reverse().map((x) => ({ date: fechaUs(x.t), close: `$${x.c.toFixed(2)}`, volume: String(x.v), open: `$${x.o.toFixed(2)}`, high: `$${x.h.toFixed(2)}`, low: `$${x.l.toFixed(2)}` }));
+  return json({ data: { symbol: sym, tradesTable: { rows: filas } }, status: { rCode: 200 } });
+}
+export const BCE_BASE = { EUR: 0.9, JPY: 150, BRL: 5.5, CNY: 7.1, GBP: 0.78, CAD: 1.37, SEK: 10.5, CHF: 0.88 };
+function frankfurter(desde) {
+  const rates = {};
+  habiles(560).map(iso).filter((d) => d >= desde).forEach((d, i) => { rates[d] = Object.fromEntries(Object.entries(BCE_BASE).map(([k, v]) => [k, v * (1 + 0.001 * Math.sin(i / 7))])); });
+  return json({ amount: 1, base: "USD", rates });
+}
+export const KRAKEN_BASE = { PAXGUSD: 4000, XBTUSD: 70000, ETHUSD: 2000 };
+function kraken(par) {
+  if (!KRAKEN_BASE[par]) return json({ error: ["EQuery:Unknown asset pair"] });
+  const hoy = Math.floor(Date.now() / 864e5) * 86400;
+  const velasK = Array.from({ length: 720 }, (_, i) => { const t = hoy - (719 - i) * 86400, c = KRAKEN_BASE[par] * (1 + 0.05 * Math.sin(i / 30)); return [t, String(c), String(c * 1.01), String(c * 0.99), String(c), String(c), "10", 100]; });
+  return json({ error: [], result: { [par]: velasK, last: hoy } });
+}
 
 async function falso(entrada, init = {}) {
   const url = new URL(typeof entrada === "string" ? entrada : entrada.url);
   const h = url.hostname, p = url.pathname;
   llamadas.push(url.href);
   const ua = cabecera(init, "user-agent");
-  if (/yahoo\.com$/.test(h) && pareceNavegador(ua)) return texto("Too Many Requests", 429);
+  if (/yahoo\.com$/.test(h) && (pareceNavegador(ua) || YAHOO_ABAJO.activo)) return texto("Too Many Requests", 429);
+  if (h === "api.nasdaq.com" && /^\/api\/quote\/[^/]+\/historical$/.test(p)) return nasdaqHistoria(decodeURIComponent(p.split("/")[3]), url.searchParams.get("assetclass"));
+  if (h === "api.frankfurter.dev" && p.startsWith("/v1/")) return frankfurter(p.slice(4).replace(/\.\.$/, ""));
+  if (h === "api.kraken.com" && p === "/0/public/OHLC") return kraken(url.searchParams.get("pair"));
   if (h === "fred.stlouisfed.org" && pareceNavegador(ua)) throw new TypeError("fetch failed (FRED no responde a agentes de navegador)");
   if (h === "production.dataviz.cnn.io" && !pareceNavegador(ua)) return texto("I'm a teapot. You're a bot.", 418);
   if (/sec\.gov$/.test(h) && !/@/.test(ua)) return texto("Undeclared Automated Tool", 403);

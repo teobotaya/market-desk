@@ -419,15 +419,18 @@ test("cada fuente recibe el User-Agent que acepta", async () => {
   const m = await ok("/api/mercado/tablero");
   const filas = m.grupos.flatMap((g) => g.items);
   assert.ok(filas.length > 25 && filas.every((x) => x.last !== undefined && !x.error), `todo el resumen con datos: ${filas.filter((x) => x.error).map((x) => x.ticker).join(", ")}`);
-  assert.ok(filas.every((x) => x.fuente === "Yahoo Finance" || x.ticker === "ETH-USD" || (x.ticker === "^MERV" && x.fuente === "BYMA")), "Yahoo para todo, salvo el Merval (BYMA) y el símbolo caído (FRED)");
+  const { YAHOO_CAIDO } = await import("./fake-fetch.mjs");
+  assert.ok(filas.every((x) => x.fuente === "Yahoo Finance" || YAHOO_CAIDO.has(x.ticker) || (x.ticker === "^MERV" && x.fuente === "BYMA")), "Yahoo para todo, salvo el Merval (BYMA) y los símbolos caídos");
 });
 
-test("si Yahoo no responde, el precio sale de FRED con el valor real", async () => {
-  const p = await ok("/api/price?t=ETH-USD");
-  assert.equal(p.source, "FRED");
-  assert.equal(p.ticker, "ETH-USD");
-  assert.ok(p.candles.length > 200 && p.stats.last > 0);
-  assert.match(p.note, /FRED \(CBETHUSD\)/);
+test("si Yahoo no responde, cada activo sale de su respaldo con el valor real", async () => {
+  const vix = await ok("/api/price?t=%5EVIX");
+  assert.equal(vix.source, "FRED");
+  assert.match(vix.note, /FRED \(VIXCLS\)/);
+  const eth = await ok("/api/price?t=ETH-USD");
+  assert.equal(eth.source, "Nasdaq");
+  assert.equal(eth.ticker, "ETH-USD");
+  assert.ok(eth.candles.length > 200 && eth.stats.last > 0);
 });
 
 test("Merval de BYMA: continuo a través del cambio de base de MSCI (19/10/2026)", async () => {
@@ -448,4 +451,36 @@ test("una serie desactualizada se muestra con su fecha si no hay otra fuente", a
   const p = await ok("/api/price?t=VIEJO%3DX");
   assert.match(p.note, /Último dato disponible/);
   assert.ok(Date.now() - Date.parse(p.stats.date) > 20 * 864e5);
+});
+
+test("con Yahoo caído del todo, el resumen de mercado igual tiene todos los datos", async () => {
+  const { YAHOO_ABAJO, BCE_BASE, KRAKEN_BASE } = await import("./fake-fetch.mjs");
+  const { limpiarCache } = await import("../lib/http.mjs");
+  YAHOO_ABAJO.activo = true;
+  limpiarCache();
+  try {
+    const m = await ok("/api/mercado/tablero");
+    const filas = m.grupos.flatMap((g) => g.items);
+    const sin = filas.filter((x) => x.error || x.last === undefined).map((x) => x.ticker);
+    assert.deepEqual(sin, [], "ninguna fila sin datos");
+    assert.ok(filas.every((x) => x.fuente !== "Yahoo Finance"));
+    const de = (t) => filas.find((x) => x.ticker === t);
+    assert.equal(de("^GSPC").fuente, "FRED");
+    assert.equal(de("^IXIC").fuente, "Nasdaq");
+    assert.equal(de("^MERV").fuente, "BYMA");
+    assert.equal(de("^TNX").fuente, "FRED");
+    assert.equal(de("GC=F").fuente, "Kraken");
+    assert.ok(Math.abs(de("GC=F").last / KRAKEN_BASE.PAXGUSD - 1) < 0.06);
+    assert.equal(de("EURUSD=X").fuente, "BCE (Frankfurter)");
+    assert.ok(Math.abs(de("EURUSD=X").last - 1 / (BCE_BASE.EUR * (1 + 0.001 * Math.sin(0)))) < 0.01);
+    const dxy = 50.14348112 * BCE_BASE.EUR ** 0.576 * BCE_BASE.JPY ** 0.136 * BCE_BASE.GBP ** 0.119 * BCE_BASE.CAD ** 0.091 * BCE_BASE.SEK ** 0.042 * BCE_BASE.CHF ** 0.036;
+    assert.ok(Math.abs(de("DX-Y.NYB").last / dxy - 1) < 0.01, "DXY con la fórmula del ICE");
+    assert.equal(de("SI=F").simbolo, "SLV", "plata por su ETF");
+    assert.equal(de("BTC-USD").fuente, "Nasdaq");
+    /* Salvo el Merval (BYMA es su fuente principal) y los ETFs (el mismo instrumento en Nasdaq), cada fila avisa de dónde sale. */
+    assert.deepEqual(filas.filter((x) => !x.nota).map((x) => x.ticker).sort(), ["EEM", "^MERV"]);
+  } finally {
+    YAHOO_ABAJO.activo = false;
+    limpiarCache();
+  }
 });
