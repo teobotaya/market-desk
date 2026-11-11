@@ -251,7 +251,8 @@ async function byma(el, ctx) {
       cont.innerHTML = `<div class="kpis compactos">${kpi("Instrumentos", String(filas.length))}${kpi("Suben", String(alza), "", "up")}${kpi("Bajan", String(baja), "", "down")}${kpi("Mediana del día", pctS(mediana(filas.map((f) => f.variacion)), 2), "", cls(mediana(filas.map((f) => f.variacion))))}</div>
         ${activo !== "adrs" && activo !== "bonos" && activo !== "ons" && activo !== "letras" ? `<div class="grid2 bloque">${tarjeta("Mayores subas", `<div data-sube></div>`)}${tarjeta("Mayores bajas", `<div data-baja></div>`)}</div>` : ""}
         ${tarjeta(PANELES.find((p) => p[0] === activo)[1], `<div data-t></div><p class="nota">${esc(d.fuente)}. ${["lider", "acciones", "cedears"].includes(activo) ? "Tocá una fila para abrir el activo (se carga como TICKER.BA)." : ""}</p>`)}`;
-      const ord = [...filas].filter((f) => f.variacion !== null && f.volumen > 0).sort((a, b) => b.variacion - a.variacion);
+      /* Fuera de horario el volumen viene en 0: alcanza con que haya operado en el día. */
+      const ord = [...filas].filter((f) => f.variacion !== null && (f.volumen > 0 || f.operaciones > 0)).sort((a, b) => b.variacion - a.variacion);
       if (cont.querySelector("[data-sube]")) {
         graficoBarras(cont.querySelector("[data-sube]"), ord.slice(0, 8).map((f) => ({ etiqueta: f.ticker, v: f.variacion })), { horizontal: true, fmt: (v) => pctS(v, 2), alClick: (it) => ctx.cargarTicker(`${it.etiqueta}.BA`, "cotizacion") });
         graficoBarras(cont.querySelector("[data-baja]"), ord.slice(-8).reverse().map((f) => ({ etiqueta: f.ticker, v: f.variacion })), { horizontal: true, fmt: (v) => pctS(v, 2), alClick: (it) => ctx.cargarTicker(`${it.etiqueta}.BA`, "cotizacion") });
@@ -492,17 +493,18 @@ async function ons(el) {
   el.innerHTML = cargando("Calculando TIR y spread de las obligaciones negociables…");
   let d;
   try { d = await api("/api/ar/ons"); } catch (e) { el.innerHTML = errorHtml(e); return; }
-  const validas = d.filas.filter((f) => !f.dudosa && f.tir !== null);
+  const validas = d.filas.filter((f) => !f.dudosa && !f.pocaLiquidez && f.tir !== null && f.tir !== undefined);
   const spreads = validas.map((f) => f.spread).filter(Number.isFinite);
+  const iliquidas = d.filas.filter((f) => f.pocaLiquidez && !f.dudosa);
   el.innerHTML = `
     <div class="kpis compactos">
-      ${kpi("Con cotización", `${validas.length} de ${d.filas.length}`, "obligaciones en dólares MEP")}
+      ${kpi("Con precio representativo", `${validas.length} de ${d.filas.length}`, iliquidas.length ? `${iliquidas.length} con poca liquidez` : "obligaciones en dólares MEP")}
       ${validas.length ? kpi("TIR mediana", pct(mediana(validas.map((f) => f.tir)), 2)) : ""}
       ${spreads.length ? kpi("Spread mediano", `${num(mediana(spreads), 0)} pb`, "contra Globales a igual duration") : ""}
       ${kpi("Liquidación", fecha(d.fechaLiq), "T+1")}
     </div>
     ${tarjeta("TIR según duration: ONs contra la curva soberana", `<div data-g></div><div class="leyenda"><span><i style="background:var(--c3)"></i>Obligaciones negociables</span><span><i style="background:var(--c1)"></i>Globales (ley Nueva York)</span></div>`)}
-    ${tarjeta("Obligaciones negociables en dólares", `<div data-t></div><p class="nota">Precio de la especie D (dólar MEP) cada 100 nominales. Spread = TIR de la ON − TIR de los Globales interpolada a la misma duration modificada: negativo significa que la ON rinde menos que el soberano. En gris, precios sin operaciones o TIR fuera de rango. ${esc(d.fuente)}.</p>`)}`;
+    ${tarjeta("Obligaciones negociables en dólares", `<div data-t></div><p class="nota">Precio de la especie D (dólar MEP) cada 100 nominales. Spread = TIR de la ON − TIR de los Globales interpolada a la misma duration modificada: negativo significa que la ON rinde menos que el soberano. En gris y fuera del gráfico y de las medianas: menos de 3 operaciones en el día (el último precio puede ser viejo) o TIR fuera de rango. ${esc(d.fuente)}.</p>`)}`;
   graficoDispersion(el.querySelector("[data-g]"), [], [
     ...validas.map((f) => ({ x: f.md, y: f.tir, etiqueta: f.ticker.replace(/D$/, ""), color: "var(--c3)", r: 4 })),
     ...d.curvaSoberana.map((f) => ({ x: f.md, y: f.tir, etiqueta: f.ticker, color: "var(--c1)", r: 5 }))
@@ -516,10 +518,10 @@ async function ons(el) {
       { k: "spread", t: "Spread", n: true, fmt: (v) => (Number.isFinite(v) ? `${num(v, 0)} pb` : "—"), cls: (v) => (v < 0 ? "warn" : "") },
       { k: "md", t: "MD", n: true, fmt: (v) => num(v, 2) },
       { k: "duration", t: "Duration", n: true, fmt: (v) => num(v, 2) },
-      { k: "volumen", t: "Volumen", n: true, fmt: grande },
+      { k: "operaciones", t: "Operaciones", n: true, fmt: (v, f) => `${num(v, 0)}${f.pocaLiquidez ? `<span class="sub">poca liquidez</span>` : ""}` },
       { k: "proximoPago", t: "Próximo pago", n: true, fmt: (v) => (v ? `${fecha(v.fecha)}<span class="sub">${num(v.total, 3)} c/100</span>` : "—"), csv: (v) => v?.fecha || "" }
     ],
-    filas: [...validas, ...d.filas.filter((f) => !validas.includes(f))], filtro: true, limite: 25, nombreCsv: "obligaciones-negociables", claseFila: (f) => (f.dudosa ? "faint" : "")
+    filas: [...validas, ...d.filas.filter((f) => !validas.includes(f))], filtro: true, limite: 25, nombreCsv: "obligaciones-negociables", claseFila: (f) => (f.dudosa || f.pocaLiquidez ? "faint" : "")
   });
 }
 
@@ -565,24 +567,25 @@ async function cedears(el, ctx) {
   el.innerHTML = cargando("Calculando el dólar implícito en cada CEDEAR…");
   let d;
   try { d = await api("/api/ar/cedears"); } catch (e) { el.innerHTML = errorHtml(e); return; }
-  const meps = d.filas.map((f) => f.mepImplicito).filter(Number.isFinite), ccls = d.filas.map((f) => f.cclImplicito).filter(Number.isFinite);
+  const meps = d.filas.filter((f) => !f.mepPocaLiquidez).map((f) => f.mepImplicito).filter(Number.isFinite);
+  const ccls = d.filas.filter((f) => !f.cclEstimado && !f.cclPocaLiquidez).map((f) => f.cclImplicito).filter(Number.isFinite);
   el.innerHTML = `
     <div class="kpis compactos">
       ${kpi("MEP de referencia", d.mepRef ? `$ ${num(d.mepRef, 2)}` : "—")}
-      ${meps.length ? kpi("MEP implícito mediano", `$ ${num(mediana(meps), 2)}`, `${meps.length} CEDEARs con especie D`) : ""}
+      ${meps.length ? kpi("MEP implícito mediano", `$ ${num(mediana(meps), 2)}`, `${meps.length} con especie D líquida`) : ""}
       ${kpi("CCL de referencia", d.cclRef ? `$ ${num(d.cclRef, 2)}` : "—")}
-      ${ccls.length ? kpi("CCL implícito mediano", `$ ${num(mediana(ccls), 2)}`, `${ccls.length} con precio en Nueva York`) : ""}
+      ${ccls.length ? kpi("CCL implícito mediano", `$ ${num(mediana(ccls), 2)}`, `${ccls.length} con especie C líquida`) : ""}
     </div>
-    ${tarjeta("Dólar implícito por CEDEAR", `<div data-t></div><p class="nota">MEP implícito = precio en pesos / precio de la especie D. CCL implícito = precio en pesos × ratio / precio de la acción en Nueva York (solo los 20 de más volumen; los horarios de cierre no coinciden, así que es aproximado). Un desvío negativo indica que el CEDEAR está barato en pesos contra el dólar de referencia. ${esc(d.fuente)}.</p>`)}`;
+    ${tarjeta("Dólar implícito por CEDEAR", `<div data-t></div><p class="nota">MEP implícito = precio en pesos / precio de la especie D. CCL implícito = precio en pesos / precio de la especie C; si no hay especie C, se estima con la acción en Nueva York y el ratio de conversión (marcado "estimado": los horarios no coinciden y el ratio puede haber cambiado). Un desvío negativo indica que el CEDEAR está barato en pesos contra el dólar de referencia. Las especies en dólares con menos de 3 operaciones en el día quedan marcadas y fuera de las medianas: su precio puede ser viejo. ${esc(d.fuente)}.</p>`)}`;
   tablaOrdenable(el.querySelector("[data-t]"), {
     columnas: [
       { k: "ticker", t: "CEDEAR", fmt: (v, f) => `<b>${esc(v)}</b><span class="sub">${esc(f.subyacente)} · ratio ${num(f.ratio, f.ratio % 1 ? 2 : 0)}</span>` },
       { k: "precio", t: "Precio $", n: true, fmt: precio },
       { k: "variacion", t: "Día", n: true, fmt: (v) => pctS(v, 2), cls },
-      { k: "mepImplicito", t: "MEP implícito", n: true, fmt: (v) => (v ? `$ ${num(v, 2)}` : "—") },
-      { k: "desvioMep", t: "Desvío MEP", n: true, fmt: (v) => pctS(v, 2), cls },
-      { k: "cclImplicito", t: "CCL implícito", n: true, fmt: (v) => (v ? `$ ${num(v, 2)}` : "—") },
-      { k: "desvioCcl", t: "Desvío CCL", n: true, fmt: (v) => pctS(v, 2), cls },
+      { k: "mepImplicito", t: "MEP implícito", n: true, fmt: (v, f) => (v ? `$ ${num(v, 2)}${f.mepPocaLiquidez ? `<span class="sub">poca liquidez</span>` : ""}` : "—") },
+      { k: "desvioMep", t: "Desvío MEP", n: true, fmt: (v) => pctS(v, 2), cls: (v, f) => (f.mepPocaLiquidez ? "faint" : cls(v)) },
+      { k: "cclImplicito", t: "CCL implícito", n: true, fmt: (v, f) => (v ? `$ ${num(v, 2)}${f.cclEstimado ? `<span class="sub">estimado</span>` : f.cclPocaLiquidez ? `<span class="sub">poca liquidez</span>` : ""}` : "—") },
+      { k: "desvioCcl", t: "Desvío CCL", n: true, fmt: (v) => pctS(v, 2), cls: (v, f) => (f.cclPocaLiquidez || f.cclEstimado ? "faint" : cls(v)) },
       { k: "volumen", t: "Volumen", n: true, fmt: grande }
     ],
     filas: d.filas, filtro: true, nombreCsv: "cedears-implicito",

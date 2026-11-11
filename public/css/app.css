@@ -160,6 +160,7 @@ tr.destacada td { background: color-mix(in srgb, var(--accent) 10%, transparent)
 .tabla-pie { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; color: var(--faint); font-size: 12px; }
 .filtro { width: 220px; margin-bottom: 8px; padding: 5px 9px; font-size: 13px; }
 td .sub { display: block; color: var(--faint); font-size: 12px; }
+td .sub.warn { color: var(--warn); }
 
 /* -------------------------------------------------------------- pestañas */
 .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 16px; overflow-x: auto; }

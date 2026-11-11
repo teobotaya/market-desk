@@ -207,7 +207,10 @@ test("paneles de BYMA, dólar implícito y BCRA", async () => {
   assert.ok(p.filas.some((x) => x.lider));
   for (const tipo of ["cedears", "bonos", "letras", "ons", "adrs"]) assert.ok((await ok(`/api/ar/panel?tipo=${tipo}`)).filas.length > 0, tipo);
   const imp = await ok("/api/ar/implicito");
-  assert.ok(imp.mepAl30 && imp.cclAl30);
+  const { MEP_SINTETICO, CCL_SINTETICO } = await import("./fake-fetch.mjs");
+  assert.ok(Math.abs(imp.mepAl30.medio - MEP_SINTETICO) < 1e-6, "MEP implícito = pesos / especie D, calculado con el panel");
+  assert.ok(Math.abs(imp.cclAl30.medio - CCL_SINTETICO) < 1e-6, "CCL implícito = pesos / especie C");
+  assert.match(imp.fuente, /panel/);
   const b = await ok("/api/ar/bcra");
   assert.equal(b.filas.length, 2);
 });
@@ -381,6 +384,7 @@ test("renta fija propia: LECAP, ONs, bonos nuevos, breakevens y CEDEARs", async 
   const ym = o.filas.find((x) => x.ticker === "YMCXD");
   assert.ok(Math.abs(ym.tir - TIR_SINTETICA.ons * 100) < 0.05, `TIR de la ON: ${ym.tir}`);
   assert.ok(Number.isFinite(ym.spread) && ym.md > 0);
+  assert.ok(o.filas.every((x) => typeof x.pocaLiquidez === "boolean" && (x.precio === null || Number.isFinite(x.operaciones))), "cada ON trae sus operaciones y la marca de liquidez");
   const n = await ok("/api/ar/dolar-nuevos");
   assert.ok(Math.abs(n.filas.find((x) => x.ticker === "AN29").tir - TIR_SINTETICA.nuevos * 100) < 0.05);
   const b = await ok("/api/ar/breakevens");
@@ -391,7 +395,9 @@ test("renta fija propia: LECAP, ONs, bonos nuevos, breakevens y CEDEARs", async 
   const ce = await ok("/api/ar/cedears");
   const aapl = ce.filas.find((x) => x.ticker === "AAPL");
   assert.ok(Math.abs(aapl.mepImplicito - 1570) < 1e-6, "MEP implícito = pesos / especie D");
-  assert.ok(aapl.cclImplicito > 0 && aapl.ratio === 20);
+  assert.ok(Math.abs(aapl.cclImplicito - 1655) < 1e-6 && !aapl.cclEstimado, "CCL implícito = pesos / especie C, sin depender del ratio");
+  const msft = ce.filas.find((x) => x.ticker === "MSFT");
+  assert.ok(msft.cclImplicito > 0 && msft.cclEstimado, "sin especie C, estimado con el ratio y el precio en Nueva York");
   assert.ok((await ok("/api/ar/metodologia")).filas.length >= 5);
   const { CER_SINTETICO } = await import("./fake-fetch.mjs");
   const cer = await ok("/api/ar/cer");
@@ -402,4 +408,44 @@ test("renta fija propia: LECAP, ONs, bonos nuevos, breakevens y CEDEARs", async 
   assert.ok(cer.filas.some((x) => x.fuente === "ArgentinaDatos"), "el resto, de ArgentinaDatos");
   assert.ok(cer.filas.filter((x) => /^(TXM|DIC|PAR)/.test(x.ticker)).every((x) => x.dudosa), "duales y Discount/Par fuera de la curva");
   assert.ok(b.implicita.length && b.implicita.every((x) => Math.abs(x.tirReal - TIR_SINTETICA.realCer * 100) < 0.1), "la inflación implícita usa la curva CER propia");
+});
+
+test("cada fuente recibe el User-Agent que acepta", async () => {
+  const { agenteDe, BROWSER_UA, UA_CORTO } = await import("../lib/http.mjs");
+  assert.equal(agenteDe("https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX"), UA_CORTO, "Yahoo responde 429 a agentes de navegador");
+  assert.equal(agenteDe("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"), UA_CORTO, "FRED no responde a agentes de navegador");
+  assert.equal(agenteDe("https://production.dataviz.cnn.io/index/fearandgreed/graphdata"), BROWSER_UA, "CNN exige uno de navegador");
+  assert.match(agenteDe("https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"), /@/, "la SEC exige un email de contacto");
+  const m = await ok("/api/mercado/tablero");
+  const filas = m.grupos.flatMap((g) => g.items);
+  assert.ok(filas.length > 25 && filas.every((x) => x.last !== undefined && !x.error), `todo el resumen con datos: ${filas.filter((x) => x.error).map((x) => x.ticker).join(", ")}`);
+  assert.ok(filas.every((x) => x.fuente === "Yahoo Finance" || x.ticker === "ETH-USD" || (x.ticker === "^MERV" && x.fuente === "BYMA")), "Yahoo para todo, salvo el Merval (BYMA) y el símbolo caído (FRED)");
+});
+
+test("si Yahoo no responde, el precio sale de FRED con el valor real", async () => {
+  const p = await ok("/api/price?t=ETH-USD");
+  assert.equal(p.source, "FRED");
+  assert.equal(p.ticker, "ETH-USD");
+  assert.ok(p.candles.length > 200 && p.stats.last > 0);
+  assert.match(p.note, /FRED \(CBETHUSD\)/);
+});
+
+test("Merval de BYMA: continuo a través del cambio de base de MSCI (19/10/2026)", async () => {
+  const { MERVAL_NUEVA, SALTO_MERVAL } = await import("./fake-fetch.mjs");
+  const p = await ok("/api/price?t=%5EMERV&rango=1y");
+  assert.equal(p.source, "BYMA");
+  assert.equal(p.nombre, "MSCI Merval");
+  assert.equal(p.moneda, "ARS");
+  const saltos = p.candles.slice(1).map((x, i) => Math.abs(x.c / p.candles[i].c - 1));
+  assert.ok(Math.max(...saltos) < 0.05, "sin el salto de 29 veces del cambio de base");
+  const ultimo = MERVAL_NUEVA.at(-1);
+  assert.ok(Math.abs(p.stats.last - ultimo.c) < 1e-6, "el último valor es el de la base nueva");
+  const previo = p.candles.filter((x) => x.d < SALTO_MERVAL).at(-1);
+  if (previo) assert.ok(Math.abs(previo.c - 100000) < 1e-6, "el cierre del 16/10 vale 100.000 en la base nueva");
+});
+
+test("una serie desactualizada se muestra con su fecha si no hay otra fuente", async () => {
+  const p = await ok("/api/price?t=VIEJO%3DX");
+  assert.match(p.note, /Último dato disponible/);
+  assert.ok(Date.now() - Date.parse(p.stats.date) > 20 * 864e5);
 });

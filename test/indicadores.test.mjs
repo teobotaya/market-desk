@@ -53,13 +53,27 @@ test("stats: retornos, medias, rango y cruce", () => {
   const rows = serie(300);
   const s = stats(rows);
   cerca(s.ret1, (rows.at(-1).c / rows.at(-2).c - 1) * 100);
-  cerca(s.ret252, (rows.at(-1).c / rows.at(-253).c - 1) * 100);
+  /* 12 meses por fecha: contra el último cierre de hace un año o antes. */
+  const haceUnAnio = new Date(Date.parse(`${rows.at(-1).d}T00:00:00Z`) - 365 * 864e5).toISOString().slice(0, 10);
+  const base = rows.filter((r) => r.d <= haceUnAnio).at(-1);
+  cerca(s.ret252, (rows.at(-1).c / base.c - 1) * 100);
   assert.ok(s.sma200 > 0 && s.vsSma200 !== null);
   assert.ok(s.high52 >= s.last && s.low52 <= s.last);
   assert.ok(s.posRango52 >= 0 && s.posRango52 <= 100);
   assert.ok(s.rsi14 > 0 && s.rsi14 < 100);
   assert.ok(s.retYtd !== null, "hay rendimiento en el año");
   assert.ok(Array.isArray(lecturaTecnica(s)));
+});
+
+test("stats con cripto (7 días por semana): 12 meses y año calendario por fecha", () => {
+  const hoy = Date.parse("2026-11-10T00:00:00Z");
+  const rows = Array.from({ length: 400 }, (_, i) => ({ d: new Date(hoy - (399 - i) * 864e5).toISOString().slice(0, 10), c: 100 + i, v: 1 }));
+  const s = stats(rows);
+  const base = rows.find((r) => r.d === "2025-11-10");
+  cerca(s.ret252, (rows.at(-1).c / base.c - 1) * 100, 1e-9);
+  const dic = rows.find((r) => r.d === "2025-12-31");
+  cerca(s.retYtd, (rows.at(-1).c / dic.c - 1) * 100, 1e-9);
+  cerca(s.low52, base.c, 1e-9);
 });
 
 test("stats tolera velas sin máximo ni mínimo", () => {

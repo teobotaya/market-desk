@@ -2,6 +2,10 @@ import { esc, num, pctS, precio, cls, cargando, errorHtml, api, tarjeta, kpi, fe
 import { sparkline, graficoBarras, graficoLineas, medidor } from "../charts.js";
 import { dossier } from "../dossier.js";
 
+/* Un dato de más de 4 días (fin de semana largo incluido) se marca con su
+   fecha: FRED y BYMA publican con demora, y no tiene que parecer de hoy. */
+const atrasado = (f) => Boolean(f) && Date.now() - Date.parse(`${f}T00:00:00Z`) > 4 * 864e5;
+
 export default {
   id: "resumen",
   titulo: "Resumen de mercado",
@@ -27,7 +31,7 @@ export default {
         <div class="tabla-scroll"><table><thead><tr><th>Activo</th><th class="n">Último</th><th class="n">Día</th><th class="n">Mes</th><th class="n">Año</th><th class="n">3 meses</th></tr></thead><tbody>
         ${g.items.map((x) => x.error
           ? `<tr><td>${esc(x.nombre)}</td><td colspan="5" class="faint" title="${esc(x.error)}">sin datos</td></tr>`
-          : `<tr class="clic" data-t="${esc(x.ticker)}" title="${esc(x.ticker)} · ${esc(x.fuente)} · ${fecha(x.fecha)}"><td>${esc(x.nombre)}</td>
+          : `<tr class="clic" data-t="${esc(x.ticker)}" title="${esc(x.ticker)} · ${esc(x.fuente)} · ${fecha(x.fecha)}"><td>${esc(x.nombre)}${atrasado(x.fecha) ? `<span class="sub warn">al ${fecha(x.fecha)} · ${esc(x.fuente)}</span>` : ""}</td>
               <td class="n">${g.tasa ? `${num(x.last, 2)}%` : precio(x.last)}</td>
               <td class="n ${cls(x.ret1)}">${pctS(x.ret1, 1)}</td><td class="n ${cls(x.ret21)}">${pctS(x.ret21, 1)}</td><td class="n ${cls(x.retYtd)}">${pctS(x.retYtd, 1)}</td>
               <td class="n">${sparkline(x.spark, { w: 64, h: 20 })}</td></tr>`).join("")}
@@ -74,7 +78,7 @@ export default {
         ${tarjeta("Curva de tasas del Tesoro de EE.UU.", `<div data-curva></div><div class="leyenda"><span><i style="background:var(--c1)"></i>Hoy</span><span><i style="background:var(--c2)"></i>Hace 1 mes</span><span><i style="background:var(--c4)"></i>Hace 1 año</span></div>
           <p class="nota">Si la parte corta rinde más que la larga, la curva está invertida: históricamente precedió recesiones, con demoras muy variables.</p>`)}
         ${tarjeta("Indicadores de la Fed (FRED)", `<div class="tabla-scroll"><table><thead><tr><th>Serie</th><th class="n">Último</th><th class="n">1 mes</th><th class="n">1 año</th><th></th></tr></thead><tbody>
-          ${d.indicadores.map((x) => x.error ? `<tr><td>${esc(x.nombre)}</td><td colspan="4" class="faint">sin datos</td></tr>` : `<tr title="${esc(x.id)} · ${fecha(x.fecha)}"><td>${esc(x.nombre)}</td><td class="n">${num(x.valor, 2)}${x.unidad === "%" ? "%" : ""}</td>
+          ${d.indicadores.map((x) => x.error ? `<tr><td>${esc(x.nombre)}</td><td colspan="4" class="faint" title="${esc(x.error)}">sin datos</td></tr>` : `<tr title="${esc(x.id)} · ${fecha(x.fecha)}"><td>${esc(x.nombre)}</td><td class="n">${num(x.valor, 2)}${x.unidad === "%" ? "%" : ""}</td>
             <td class="n ${cls(x.cambio1m)}">${x.cambio1m === null ? "—" : `${x.cambio1m > 0 ? "+" : ""}${num(x.cambio1m, 2)}`}</td><td class="n ${cls(x.cambio1a)}">${x.cambio1a === null ? "—" : `${x.cambio1a > 0 ? "+" : ""}${num(x.cambio1a, 2)}`}</td>
             <td class="n">${sparkline(x.serie.slice(-120).map((p) => p.v), { w: 70, h: 20, color: "var(--accent)" })}</td></tr>`).join("")}
           </tbody></table></div><p class="nota">${esc(d.fuente)}. Cambios en puntos porcentuales.</p>`)}

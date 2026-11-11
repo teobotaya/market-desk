@@ -184,7 +184,7 @@ async function dibujarWatchlist() {
     cont.innerHTML = filas.map((f, i) => {
       const t = lista[i];
       return `<a class="wl" data-wt="${esc(t)}" href="#/cotizacion?t=${encodeURIComponent(t)}" title="${esc(f.nombre || f.error || "")}">
-        <span class="wl-t">${esc(t)}</span>${f.error ? `<span class="wl-v faint">sin datos</span>` : `<span class="wl-s">${sparkline(f.spark?.slice(-22), { w: 44, h: 16 })}</span><span class="wl-v ${cls(f.ret1)}">${pctS(f.ret1, 1)}</span>`}
+        <span class="wl-t">${esc(t)}</span>${f.error ? `<span class="wl-v faint" title="${esc(f.error)}">sin datos</span>` : `<span class="wl-s">${sparkline(f.spark?.slice(-22), { w: 44, h: 16 })}</span><span class="wl-v ${cls(f.ret1)}">${pctS(f.ret1, 1)}</span>`}
         <button class="wl-x" data-quitar="${esc(t)}" title="Quitar" aria-label="Quitar ${esc(t)}">×</button></a>`;
     }).join("");
   } catch { /* la watchlist no es crítica */ }

@@ -60,7 +60,8 @@ const texto = (t, status = 200, tipo = "text/plain") => new Response(t, { status
 function yahooChart(sym, rango, intervalo) {
   if (sym.startsWith("NOEXISTE")) return json({ chart: { result: null, error: { code: "Not Found", description: "No data found, symbol may be delisted" } } }, 404);
   const n = intervalo === "3mo" ? 40 : ({ "1y": 252, "2y": 504, "5y": 1260, "10y": 2520 }[rango] || 504);
-  const rows = velas(sym, n);
+  /* "VIEJO…": una serie que dejó de actualizarse hace más de un mes (como el ^MERV de Yahoo tras el cambio a MSCI). */
+  const rows = sym.startsWith("VIEJO") ? velas(sym, n).slice(0, -25) : velas(sym, n);
   const ars = sym.endsWith(".BA") || sym === "^MERV";
   const events = sym === "PRUEBA"
     ? { splits: { a: { date: Date.parse("2025-06-10") / 1000, numerator: 4, denominator: 1 } }, dividends: { b: { date: Date.now() / 1000 - 90 * 864e2, amount: 0.5 } } }
@@ -291,23 +292,26 @@ function flujosRealesCer(def) {
   return def.flujos.map(([f, am, tasa, base]) => { const c = residual * tasa * base; residual -= am; return [f, (am + c) * 100]; });
 }
 
+/* Dólar MEP y cable implícitos en los precios sintéticos. */
+export const MEP_SINTETICO = 1570, CCL_SINTETICO = 1655;
 function precioSintetico(tipo, s) {
-  const usd = BONOS_USD[s.replace(/D$/, "")];
-  if (tipo === "arg_bonds" && usd) return s.endsWith("D") ? usd : usd * 1570;
+  const usd = BONOS_USD[s.replace(/[DC]$/, "")];
+  if (tipo === "arg_bonds" && usd) return s.endsWith("D") ? usd : s.endsWith("C") ? (usd * MEP_SINTETICO) / CCL_SINTETICO : usd * MEP_SINTETICO;
   if (TASA_FIJA[s]) return TASA_FIJA[s].pagoFinal / (1 + TIR_SINTETICA.temLecap) ** (((Date.parse(TASA_FIJA[s].vence) - Date.parse(hoyF())) / 864e5) / 30);
   if (tipo === "arg_corp" && ONS[s]) return valorPresente(ONS[s].flujos, TIR_SINTETICA.ons);
   if (CER[s]) return valorPresente(flujosRealesCer(CER[s]), TIR_SINTETICA.realCer) * (CER_SINTETICO / CER[s].cerEmision);
   const nuevo = DOLAR_NUEVOS[s.replace(/D$/, "")];
   if (tipo === "arg_bonds" && nuevo) return s.endsWith("D") ? valorPresente(nuevo.flujos, TIR_SINTETICA.nuevos) : valorPresente(nuevo.flujos, TIR_SINTETICA.nuevos) * 1570;
-  if (tipo === "arg_cedears" && s.length > 2 && s.endsWith("D") && !s.startsWith("D")) return base(`${s.slice(0, -1)}.BA`) / 1570;
+  if (tipo === "arg_cedears" && s.length > 2 && s.endsWith("D") && !s.startsWith("D")) return base(`${s.slice(0, -1)}.BA`) / MEP_SINTETICO;
+  if (tipo === "arg_cedears" && s === "AAPLC") return base("AAPL.BA") / CCL_SINTETICO;
   return base(`${s}.BA`);
 }
 
 function panelBYMA(tipo) {
   const listas = {
     arg_stocks: ["GGAL", "YPFD", "PAMP", "ALUA", "BMA", "TXAR", "CEPU", "LOMA", "TGSU2", "SUPV", "BBAR", "COME", "EDN", "CRES", "IRSA", "METR", "TECO2", "TRAN", "VALO", "BYMA", "MOLI", "HARG", "AGRO"],
-    arg_cedears: ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "KO", "MELI", "SPY", "QQQ", "AAPLD", "MSFTD", "KOD"],
-    arg_bonds: [...Object.keys(BONOS_USD).flatMap((t) => [t, `${t}D`]), "T15E7", "AO27", "AO27D", "AN29D", "TZXD6", "TZXM7", "TZX27", "TZXD7", "TZX28", "TX28", "TX31"],
+    arg_cedears: ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "KO", "MELI", "SPY", "QQQ", "AAPLD", "MSFTD", "KOD", "AAPLC"],
+    arg_bonds: [...Object.keys(BONOS_USD).flatMap((t) => [t, `${t}D`, `${t}C`]), "T15E7", "AO27", "AO27D", "AN29D", "TZXD6", "TZXM7", "TZX27", "TZXD7", "TZX28", "TX28", "TX31"],
     arg_notes: ["S13N6", "S30N6", "X30N6"],
     arg_corp: ["YMCXO", "TLC1O", "PNDCO", "YMCXD", "MGCOD", "VSCTD", "TSC4D"],
     usa_adrs: ["GGAL", "YPF", "PAM", "BMA", "TEO", "CEPU"]
@@ -319,17 +323,49 @@ function panelBYMA(tipo) {
   }));
 }
 
-function implicito(tipo) {
-  const base_ = tipo === "mep" ? 1570 : 1655;
-  return json(["AL30", "GD30", "AL35", "GD35"].map((t, i) => ({ ticker: t, bid: base_ - 2 + i, ask: base_ + 2 + i, close: base_ + i, mark: base_ + i, v_usd: 5e6 / (i + 1), v_ars: 8e9 / (i + 1), panel: "bonds" })));
+/* Merval de BYMA con el cambio de base del 19/10/2026: hasta el 16/10 en
+   puntos del S&P Merval y desde el 19/10 en la base 100.000 de MSCI. La serie
+   "verdadera" (en base nueva) es MERVAL_NUEVA; BYMA la publica cortada. */
+export const SALTO_MERVAL = "2026-10-19", FACTOR_MERVAL = 28.4894527;
+export const MERVAL_NUEVA = (() => {
+  const dias = habiles(320).map(iso), r = rng(hash("merval"));
+  let v = 1;
+  const w = dias.map(() => (v *= 1 + (r() - 0.5) * 0.03));
+  const iBase = dias.findLastIndex((d) => d < SALTO_MERVAL);
+  return dias.map((d, i) => ({ d, c: (100000 * w[i]) / (iBase >= 0 ? w[iBase] : 1) }));
+})();
+function bymaIndice() {
+  const filas = MERVAL_NUEVA.map((x) => ({ ...x, c: x.d < SALTO_MERVAL ? x.c * FACTOR_MERVAL : x.c }));
+  return json({ s: "ok", t: filas.map((x) => Date.parse(`${x.d}T00:00:00Z`) / 1000), o: filas.map((x) => x.c), h: filas.map((x) => x.c * 1.004), l: filas.map((x) => x.c * 0.996), c: filas.map((x) => x.c), v: filas.map(() => 0) });
 }
 
 /* ------------------------------------------------------------- router */
+
+/* Lo que hacen las fuentes reales con cada User-Agent (comprobado en
+   noviembre de 2026): Yahoo responde 429 y FRED no responde a quien se
+   presenta como un navegador completo; CNN exige uno de navegador; la SEC,
+   uno con email de contacto. El fetch falso hace lo mismo, así un cambio que
+   vuelva a mandar el agente equivocado rompe los tests. */
+const cabecera = (init, nombre) => {
+  const h = init?.headers || {};
+  if (typeof h.get === "function") return h.get(nombre) || "";
+  const k = Object.keys(h).find((x) => x.toLowerCase() === nombre.toLowerCase());
+  return k ? String(h[k]) : "";
+};
+const pareceNavegador = (ua) => /Chrome\/|Firefox\/|Safari\//.test(ua);
+/* Símbolos que Yahoo "no sirve" en los tests, para probar el respaldo de FRED. */
+export const YAHOO_CAIDO = new Set(["ETH-USD"]);
 
 async function falso(entrada, init = {}) {
   const url = new URL(typeof entrada === "string" ? entrada : entrada.url);
   const h = url.hostname, p = url.pathname;
   llamadas.push(url.href);
+  const ua = cabecera(init, "user-agent");
+  if (/yahoo\.com$/.test(h) && pareceNavegador(ua)) return texto("Too Many Requests", 429);
+  if (h === "fred.stlouisfed.org" && pareceNavegador(ua)) throw new TypeError("fetch failed (FRED no responde a agentes de navegador)");
+  if (h === "production.dataviz.cnn.io" && !pareceNavegador(ua)) return texto("I'm a teapot. You're a bot.", 418);
+  if (/sec\.gov$/.test(h) && !/@/.test(ua)) return texto("Undeclared Automated Tool", 403);
+  if (/query\d\.finance\.yahoo\.com/.test(h) && p.startsWith("/v8/finance/chart/") && YAHOO_CAIDO.has(decodeURIComponent(p.split("/").pop()))) return texto("Too Many Requests", 429);
 
   if (h === "fc.yahoo.com" || h === "finance.yahoo.com") return new Response("", { status: 404, headers: { "set-cookie": "A3=d=sintetico; Path=/; Domain=.yahoo.com" } });
   if (/query\d\.finance\.yahoo\.com/.test(h)) {
@@ -376,9 +412,10 @@ async function falso(entrada, init = {}) {
     if (rutas[p]) return json(AR[rutas[p]]);
     if (p === "/v1/finanzas/cauciones/ars") return json([{ plazo: 1, montoContado: 4.2e11, tasaActual: 24.5, tasaMinDia: 23, tasaMaxDia: 26, fechaOperacion: iso(Date.now()) }, { plazo: 7, montoContado: 3e10, tasaActual: 25.1, tasaMinDia: 24, tasaMaxDia: 26.2, fechaOperacion: iso(Date.now()) }]);
   }
+  if (h === "open.bymadata.com.ar" && p.endsWith("/chart/index-historical-series/history") && url.searchParams.get("symbol") === "M") return bymaIndice();
   if (h === "data912.com") {
-    if (p.startsWith("/live/mep")) return implicito("mep");
-    if (p.startsWith("/live/ccl")) return implicito("ccl");
+    /* Desde noviembre de 2026 data912 devuelve estas listas vacías: la app calcula los implícitos con el panel. */
+    if (p.startsWith("/live/mep") || p.startsWith("/live/ccl")) return json([]);
     if (p.startsWith("/live/")) return panelBYMA(p.split("/").pop());
     if (p.startsWith("/eod/volatilities/")) return json([{ iv_s_term: 0.42, iv_m_term: 0.39, iv_l_term: 0.37, iv_s_term_percentile: 0.71, iv_m_term_percentile: 0.64, iv_l_term_percentile: 0.55, hv_s_term: 0.35, hv_m_term: 0.36, hv_l_term: 0.38, hv_s_term_percentile: 0.5, hv_m_term_percentile: 0.52, hv_l_term_percentile: 0.6, iv_hv_s_ratio: 1.2, iv_hv_m_ratio: 1.08, iv_hv_l_ratio: 0.97, fair_iv: 0.38, iv_fair_iv_ratio: 1.03 }]);
     if (p.includes("NOEXISTE")) return json([]);

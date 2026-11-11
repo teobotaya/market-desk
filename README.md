@@ -72,20 +72,25 @@ Todas gratuitas. Las de la tabla funcionan **sin clave**.
 | [Nasdaq](https://www.nasdaq.com) | Precios de respaldo y calendario de balances |
 | [Stooq](https://stooq.com) | Precios de respaldo |
 | [SEC EDGAR](https://www.sec.gov/edgar) | Estados financieros XBRL (US GAAP e IFRS), 10-K/20-F, presentaciones, formularios 4 |
-| [FRED](https://fred.stlouisfed.org) | Tasas del Tesoro, curva, tasas reales, inflación implícita, spreads de crédito (CSV público, sin clave) |
+| [FRED](https://fred.stlouisfed.org) | Tasas del Tesoro, curva, tasas reales, inflación implícita, spreads de crédito (CSV público, sin clave). Respaldo de índices, VIX, tasas, petróleo, gas, monedas y cripto cuando Yahoo no responde |
 | [CNN Fear & Greed](https://edition.cnn.com/markets/fear-and-greed) | Índice de miedo y codicia |
 | [Google News](https://news.google.com) | Titulares (RSS) |
 | [DolarApi](https://dolarapi.com) | Dólares argentinos en vivo |
 | [ArgentinaDatos](https://argentinadatos.com) | Historia del dólar, riesgo país, inflación, REM, plazo fijo, cauciones, FCI, letras y bonos CER |
-| [data912](https://data912.com) | Paneles de BYMA (precios de bonos, letras, ONs y CEDEARs para los cálculos propios), dólar implícito por bono, historia de bonos, volatilidad implícita de opciones |
+| [data912](https://data912.com) | Paneles de BYMA (precios de bonos, letras, ONs y CEDEARs para los cálculos propios, incluido el dólar implícito por bono y por CEDEAR), historia de bonos, volatilidad implícita de opciones |
+| [BYMA Datos Abiertos](https://open.bymadata.com.ar) | Merval oficial (MSCI Merval desde el 19/10/2026) |
 | [BCRA](https://www.bcra.gob.ar/apis-banco-central/) | Variables monetarias oficiales y límites de la banda cambiaria (API v4, series 1187 y 1188) |
 | [TradingView](https://www.tradingview.com/widget-docs/) | Widgets embebidos (se cargan en tu navegador) |
 
 Opcional con clave gratuita: **[Finnhub](https://finnhub.io)** (`FINNHUB_API_KEY`) como respaldo
 de recomendaciones, sorpresas de ganancias, pares de industria y métricas cuando Yahoo no responde.
 
-Si una fuente cae, la app lo dice en la tarjeta correspondiente y el resto sigue funcionando. Los
-precios pasan por una cadena Yahoo → Nasdaq → Stooq (y data912 para BYMA).
+Si una fuente cae, la app lo dice en la tarjeta correspondiente y el resto sigue funcionando (pasando
+el mouse sobre "sin datos" se ve el motivo). Los precios pasan por una cadena: Yahoo → FRED (índices,
+tasas, VIX, energía, monedas y cripto, con el valor real del índice) → Nasdaq → Stooq, data912 para
+BYMA y BYMA para el Merval. Una serie con más de 10 días de atraso se considera desactualizada: se prueba
+la fuente siguiente y, si ninguna tiene algo más nuevo, se muestra con su fecha. En el resumen, todo
+dato de más de 4 días aparece con su fecha y su fuente.
 
 ### Herramientas pagas que se usan gratis
 
@@ -180,6 +185,14 @@ información confidencial de clientes.
 - **ROIC**: resultado operativo después de impuestos sobre patrimonio + deuda − caja. Es una
   aproximación, no la definición contable.
 - **Sharpe**: sin tasa libre de riesgo. **Sortino**: con semidesvío (solo caídas).
+- **12 meses y rango de 52 semanas**: por fecha, no por cantidad de ruedas (cripto opera los 7 días).
+- **Merval**: desde el 19/10/2026 lo calcula MSCI (MSCI Merval, base 100.000 en el cierre del 16/10) y
+  Yahoo dejó de actualizar `^MERV`. La serie sale de BYMA y los valores anteriores se reexpresan en la base
+  nueva (valor × 100.000 / cierre del 16/10), así no aparece un salto falso de 29 veces.
+- **Dólar implícito**: precio en pesos ÷ precio de la especie D (MEP) o C (cable), con el panel de BYMA.
+  En los CEDEARs no depende del ratio de conversión; sin especie C se estima con la acción en Nueva York y
+  el ratio, marcado. Una especie con menos de 3 operaciones en el día se marca como de poca liquidez y queda
+  fuera de las medianas y los gráficos (su último precio puede ser viejo); lo mismo con las ONs.
 
 ## Seguridad y privacidad
 
@@ -189,6 +202,8 @@ información confidencial de clientes.
   movimientos de compra al leerlos.
 - El servidor escucha solo en `127.0.0.1`; `HOST=0.0.0.0` lo abre a tu red (y tu clave de IA con él).
 - Las claves se leen de `.env` (cubierto por `.gitignore`) y nunca llegan al navegador.
+- La SEC exige un email de contacto en cada pedido: poné el tuyo en `SEC_UA` dentro de `.env`
+  (por ejemplo `SEC_UA=market-desk tu@email.com`).
 - Bloquea pedidos desde otros dominios (protección contra *DNS rebinding*) y exige JSON en
   `/api/analizar`, así otra página no puede gastar tu cuota de IA.
 - Política de seguridad de contenido: el navegador solo carga código propio y los widgets de TradingView.
@@ -202,18 +217,21 @@ información confidencial de clientes.
   algunos están en discusión; el resultado realizado y la valuación al 31/12 sirven de base para el contador.
 - **Los léxicos (noticias, earnings call, riesgos del 10-K) son reglas**: ordenan la lectura, no la reemplazan.
 - **Las fuentes no oficiales pueden cambiar** sin aviso (Yahoo, Nasdaq, CNN). La sección *Fuentes y
-  claves* muestra cuál falla.
+  claves* muestra cuál falla. Ejemplo real: en noviembre de 2026 Yahoo empezó a responder 429 y FRED a no
+  responder a quien se presenta como un navegador completo; por eso cada fuente recibe su propio
+  User-Agent (`lib/http.mjs`), y los tests fallan si alguna vuelve a recibir el equivocado.
 - **No decide por vos.** Arma el expediente; el juicio es tuyo.
 
 ## Desarrollo
 
 ```bash
-npm test     # 57 tests sin red: fórmulas, bonos, TWR y TIR, parsers, XBRL, clientes y todas las rutas de la API
+npm test     # 62 tests sin red: fórmulas, bonos, TWR y TIR, parsers, XBRL, clientes, fuentes y todas las rutas de la API
 npm run dev  # reinicia el servidor al guardar
 ```
 
 Los tests usan un `fetch` falso (`test/fake-fetch.mjs`): Argentina con datos reales recortados de
-ArgentinaDatos y DolarApi, y series sintéticas rotuladas para el resto.
+ArgentinaDatos y DolarApi, y series sintéticas rotuladas para el resto. El `fetch` falso reproduce lo que
+hace cada fuente real con cada User-Agent, las listas vacías de data912 y el cambio de base del Merval.
 
 ```
 market-desk
@@ -226,6 +244,8 @@ market-desk
 │   ├── sec.mjs           XBRL, TTM, PER, comparables, 10-K, filings e insiders
 │   ├── argentina.mjs     dólar, riesgo país, inflación, REM, tasas, renta fija, BYMA, BCRA
 │   ├── mercado.mjs       tablero global, sectores, FRED, Fear & Greed, calendario
+│   ├── fred.mjs          series de FRED y respaldo de precios cuando Yahoo no responde
+│   ├── byma.mjs          índices de BYMA (Merval), con el cambio de base a MSCI
 │   ├── noticias.mjs      Google News y léxico bilingüe
 │   ├── bonos.mjs         soberanos en dólares: cronogramas, TIR, duration, paridad
 │   ├── instrumentos.mjs  condiciones de LECAP/BONCAP, Bonares nuevos, BOPREAL, ONs y ratios de CEDEARs
