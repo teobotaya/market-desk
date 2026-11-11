@@ -81,7 +81,7 @@ Todas gratuitas. Las de la tabla funcionan **sin clave**.
 | [BYMA Datos Abiertos](https://open.bymadata.com.ar) | Merval oficial (MSCI Merval desde el 19/10/2026) |
 | [Frankfurter](https://frankfurter.dev) (BCE) | Respaldo de monedas: tipos de referencia diarios del Banco Central Europeo; el DXY se reconstruye con la fórmula del ICE |
 | [Kraken](https://docs.kraken.com/api/) | Respaldo de oro (PAXG, respaldado por una onza troy) y cripto |
-| [BCRA](https://www.bcra.gob.ar/apis-banco-central/) | Variables monetarias oficiales y límites de la banda cambiaria (API v4, series 1187 y 1188) |
+| [BCRA](https://www.bcra.gob.ar/apis-banco-central/) | Variables monetarias oficiales, CER y límites de la banda cambiaria (API v4). A veces tarda 20 s: la app espera 30, reintenta una vez y si no, usa el último dato bueno; el CER se reconstruye con la UVA de ArgentinaDatos (UVA × 0,396229) |
 | [TradingView](https://www.tradingview.com/widget-docs/) | Widgets embebidos (se cargan en tu navegador) |
 
 Opcional con clave gratuita: **[Finnhub](https://finnhub.io)** (`FINNHUB_API_KEY`) como respaldo
@@ -229,7 +229,7 @@ información confidencial de clientes.
 ## Desarrollo
 
 ```bash
-npm test     # 63 tests sin red: fórmulas, bonos, TWR y TIR, parsers, XBRL, clientes, fuentes y todas las rutas de la API
+npm test     # 64 tests sin red: fórmulas, bonos, TWR y TIR, parsers, XBRL, clientes, fuentes y todas las rutas de la API
 npm run dev  # reinicia el servidor al guardar
 ```
 

@@ -484,3 +484,27 @@ test("con Yahoo caído del todo, el resumen de mercado igual tiene todos los dat
     limpiarCache();
   }
 });
+
+test("si el BCRA no responde: CER desde la UVA y último dato bueno de la banda", async () => {
+  const { BCRA_ABAJO, CER_SINTETICO, TIR_SINTETICA } = await import("./fake-fetch.mjs");
+  const { limpiarCache } = await import("../lib/http.mjs");
+  limpiarCache();
+  const antes = await ok("/api/ar/breakevens");
+  assert.ok(antes.banda.techo > 0);
+  BCRA_ABAJO.activo = true;
+  try {
+    limpiarCache(false);
+    const b = await ok("/api/ar/breakevens");
+    assert.equal(b.banda.techo, antes.banda.techo, "la banda sale del último dato bueno del BCRA");
+    limpiarCache(true);
+    const c = await ok("/api/ar/cer");
+    assert.ok(c.cerReferencia.estimado, "CER reconstruido con la UVA");
+    assert.ok(Math.abs(c.cerReferencia.valor / CER_SINTETICO - 1) < 1e-4);
+    assert.match(c.avisos.join(" "), /UVA/);
+    const propios = c.filas.filter((x) => x.fuente === "propia" && x.tir !== null);
+    assert.ok(propios.length >= 6 && propios.every((x) => Math.abs(x.tir - TIR_SINTETICA.realCer * 100) < 0.05));
+  } finally {
+    BCRA_ABAJO.activo = false;
+    limpiarCache();
+  }
+});

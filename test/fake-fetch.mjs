@@ -357,6 +357,7 @@ const pareceNavegador = (ua) => /Chrome\/|Firefox\/|Safari\//.test(ua);
    un interruptor para simular a Yahoo caído del todo. */
 export const YAHOO_CAIDO = new Set(["ETH-USD", "^VIX"]);
 export const YAHOO_ABAJO = { activo: false };
+export const BCRA_ABAJO = { activo: false };
 
 /* Respaldos: Nasdaq (acciones, ETFs, índices COMP y NDX, cripto BTC y ETH),
    tipos del BCE (Frankfurter) y Kraken. */
@@ -439,6 +440,8 @@ async function falso(entrada, init = {}) {
       "/v1/finanzas/fci/mercadoDinero/ultimo": "ad_fci_u", "/v1/finanzas/fci/mercadoDinero/penultimo": "ad_fci_p", "/v1/finanzas/letras": "ad_letras", "/v1/finanzas/bonos-cer": "ad_cer"
     };
     if (rutas[p]) return json(AR[rutas[p]]);
+    /* UVA = CER / 0,396229: con el CER sintético constante, la UVA también lo es. */
+    if (p === "/v1/finanzas/indices/uva") return json(habiles(60).map((d) => ({ fecha: iso(d), valor: Math.round((CER_SINTETICO / 0.396229) * 100) / 100 })));
     if (p === "/v1/finanzas/cauciones/ars") return json([{ plazo: 1, montoContado: 4.2e11, tasaActual: 24.5, tasaMinDia: 23, tasaMaxDia: 26, fechaOperacion: iso(Date.now()) }, { plazo: 7, montoContado: 3e10, tasaActual: 25.1, tasaMinDia: 24, tasaMaxDia: 26.2, fechaOperacion: iso(Date.now()) }]);
   }
   if (h === "open.bymadata.com.ar" && p.endsWith("/chart/index-historical-series/history") && url.searchParams.get("symbol") === "M") return bymaIndice();
@@ -455,6 +458,7 @@ async function falso(entrada, init = {}) {
     }
     if (p.startsWith("/historical/")) return json(velas(p.split("/").pop(), 300).map((x) => ({ date: iso(x.t * 1000), o: x.o, h: x.h, l: x.l, c: x.c, v: x.v, dr: 0, sa: 0 })));
   }
+  if (h === "api.bcra.gob.ar" && BCRA_ABAJO.activo) return texto("Service Unavailable", 503);
   if (h === "api.bcra.gob.ar") {
     /* Series diarias (v4): límites de la banda cambiaria. */
     const serie = p.match(/\/Monetarias\/(\d+)$/);
